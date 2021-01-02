@@ -1,33 +1,21 @@
 mod state;
 mod simulator;
 mod bots;
+mod client;
 
 use state::*;
 use simulator::*;
 use bots::*;
+use client::*;
+
+use std::env;
 
 fn main() {
-    let bots =
-        vec![
-            Box::new(RandomBot::new(0)) as Box<dyn Player>,
-            Box::new(RandomBot::new(1)),
-        ];
+    let args: Vec<String> = env::args().collect();
+    let mut client = Client::new("ws://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
-    let state = State::generate(10, 10, 20, 7, 2);
-    let mut sim = Simulator::new(state, bots);
+    client.join_private(&args[2]);
 
-    sim.sim(500);
-
-    // let mut state = State::generate(10, 10, 0, 0, 0);
-
-    // state.generals.push(0);
-    // state.armies[0] = 5;
-    // state.cities[0] = 0;
-    // state.terrain[0] = 0;
-
-    // state.cities[10] = 0;
-    // state.armies[10] = 10;
-    // state.terrain[10] = -1;
-
-    // println!("{}", state.move_is_valid(0, Move::new(0, 10, false)));
+    client.run_player(Box::new(RandomBot::new()));
+    // client.debug_listen();
 }
