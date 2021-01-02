@@ -6,22 +6,22 @@ pub struct RandomBot {
 }
 
 impl RandomBot {
-    pub fn new(player: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             state: State::new(),
-            player
+            player: 0
         }
     }
 }
 
 impl Player for RandomBot {
+    fn init(&mut self, _: &Vec<usize>, player: usize) {
+        self.player = player;
+    }
+
     fn get_move(&mut self, diff: StateDiff) -> Option<Move> {
         self.state.patch(diff);
-
-        // if self.player == 0 {
-            // println!("{}", self.state);
-        // }
-
+        println!("{}", self.state);
         self.state.get_random_move(self.player)
     }
 }

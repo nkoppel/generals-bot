@@ -8,6 +8,8 @@ pub use rand::random;
 pub use rand::Rng;
 pub use rand::seq::SliceRandom;
 
+use serde_json::Value;
+
 fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
     let mut out = Vec::new();
     let mut start = true;
@@ -88,11 +90,11 @@ pub struct State {
 
 #[derive(Clone, Debug)]
 pub struct StateDiff {
-    turn: usize,
-    map_diff: Vec<isize>,
-    cities_diff: Vec<isize>,
-    generals: Vec<isize>,
-    scores: Vec<(usize, usize)>
+    pub turn: usize,
+    pub map_diff: Vec<isize>,
+    pub cities_diff: Vec<isize>,
+    pub generals: Vec<isize>,
+    pub scores: Vec<(usize, usize)>
 }
 
 impl State {
@@ -114,7 +116,6 @@ impl State {
         let size = self.width * self.height;
 
         out.armies = vec![0; size];
-        out.cities = vec![-1; size];
         out.generals = vec![-1; self.generals.len()];
 
         out.terrain = vec![TILE_FOG; size];
@@ -148,7 +149,7 @@ impl State {
             turn: 0,
             terrain: vec![TILE_EMPTY; size],
             armies: vec![0; size],
-            cities: vec![-1; size],
+            cities: Vec::new(),
             generals: vec![0; nplayers],
             scores: vec![(0, 0); nplayers],
         };
@@ -159,14 +160,13 @@ impl State {
         }
 
         for _ in 0..ncities {
-            out.cities[tiles[i]] = 0;
+            out.cities.push(tiles[i] as isize);
             out.armies[tiles[i]] = rng.gen_range(40, 51);
             i += 1;
         }
 
         for j in 0..nplayers {
             out.generals[j] = tiles[i] as isize;
-            out.cities[tiles[i]] = 0;
             out.terrain[tiles[i]] = j as isize;
             i += 1;
         }
@@ -210,7 +210,6 @@ impl State {
 
         self.turn = diff.turn;
         self.deserialize_map(&patch(&map, &diff.map_diff));
-        // println!("cities");
         self.cities = patch(&self.cities, &diff.cities_diff);
         self.generals = diff.generals;
         self.scores = diff.scores;
@@ -254,7 +253,7 @@ impl fmt::Display for State {
                 if let Some(n) = tmp {
                     pad = '\\';
                     front = player_colors[n as usize]
-                } else if self.cities[i] >= 0 {
+                } else if self.cities.contains(&(i as isize)) {
                     pad = '0';
 
                     if self.terrain[i] >= 0 {

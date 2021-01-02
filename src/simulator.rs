@@ -48,7 +48,6 @@ impl State {
                         y2 < self.height as isize
                     {
                         out.terrain[loc2] = self.terrain[loc2];
-                        out.cities[loc2] = self.cities[loc2];
                         out.armies[loc2] = self.armies[loc2];
 
                         let tmp = self.generals
@@ -72,16 +71,27 @@ impl State {
             }
         }
 
+        for loc in &self.cities {
+            if out.terrain[*loc as usize] >= TILE_EMPTY {
+                out.cities.push(*loc);
+            }
+        }
+
         out
     }
 
     pub fn incr_armies(&mut self) {
-        for i in 0..self.terrain.len() {
-            if self.terrain[i] >= 0 &&
-                ((self.cities[i] >= 0 && self.turn % 2 == 0) ||
-                  self.turn % 50 == 0)
-            {
-                self.armies[i] += 1;
+        if self.turn % 50 == 0 {
+            for i in 0..self.terrain.len() {
+                if self.terrain[i] >= 0 {
+                    self.armies[i] += 1;
+                }
+            }
+        } else if self.turn % 2 == 0 {
+            for i in &self.cities {
+                if self.terrain[*i as usize] >= 0 {
+                    self.armies[*i as usize] += 1;
+                }
             }
         }
 
@@ -197,6 +207,7 @@ impl State {
 }
 
 pub trait Player {
+    fn init(&mut self, teams: &Vec<usize>, player: usize);
     fn get_move(&mut self, diff: StateDiff) -> Option<Move>;
 }
 
@@ -207,8 +218,13 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn new(state: State, players: Vec<Box<dyn Player>>) -> Self {
+    pub fn new(state: State, mut players: Vec<Box<dyn Player>>) -> Self {
         let player_states = vec![State::new(); state.generals.len()];
+        let teams = (1..players.len() + 1).collect::<Vec<_>>();
+
+        for i in 0..players.len() {
+            players[i].init(&teams, i);
+        }
 
         Self {
             state,
@@ -218,7 +234,7 @@ impl Simulator {
     }
 
     pub fn sim(&mut self, rounds: usize) -> Option<usize> {
-        println!("{}", self.state);
+        // println!("{}", self.state);
 
         for _ in 0..rounds {
             self.state.incr_armies();
@@ -236,7 +252,7 @@ impl Simulator {
 
                     let mov = self.players[player].get_move(diff);
 
-                    println!("{:?}", mov);
+                    // println!("{:?}", mov);
                     moves.push(mov);
 
                     if let Some(m) = mov {
@@ -263,7 +279,7 @@ impl Simulator {
 
             self.state = state;
 
-            println!("{}", self.state);
+            // println!("{}", self.state);
         }
 
         None
