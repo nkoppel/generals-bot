@@ -18,8 +18,8 @@ fn get_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
     out
 }
 
-type Path = (usize, Vec<usize>);
-type Paths = Vec<(usize, Vec<usize>)>;
+type Path = (isize, Vec<usize>);
+type Paths = Vec<Path>;
 
 fn better_path(p1: &mut Path, p2: Path) {
     if p2.0 > p1.0 {
@@ -27,13 +27,13 @@ fn better_path(p1: &mut Path, p2: Path) {
     }
 }
 
-fn combine_simple(_: usize, _: usize, paths1: &mut Paths, paths2: Paths) {
+fn combine_simple(_: isize, _: usize, paths1: &mut Paths, paths2: Paths) {
     for (p1, p2) in paths1.iter_mut().zip(paths2.into_iter()) {
         better_path(p1, p2);
     }
 }
 
-fn combine_branch(reward: usize, cost: usize, paths1: &mut Paths, paths2: Paths) {
+fn combine_branch(reward: isize, cost: usize, paths1: &mut Paths, paths2: Paths) {
     let len = paths1.len();
 
     for i in cost..len {
@@ -50,14 +50,14 @@ fn combine_branch(reward: usize, cost: usize, paths1: &mut Paths, paths2: Paths)
 
 use std::collections::VecDeque;
 
-pub fn find_path<F>(width: usize,
-                    height: usize,
-                    start: usize,
-                    branch: bool,
-                    max_cost: usize,
-                    reward_func: F,
-                    cost_func: F) -> Vec<(usize, Vec<usize>)>
-    where F: Fn(usize) -> usize
+pub fn find_path<F1, F2>(width: usize,
+                         height: usize,
+                         start: usize,
+                         branch: bool,
+                         max_cost: usize,
+                         reward_func: F1,
+                         cost_func: F2) -> Paths
+    where F1: Fn(usize) -> isize, F2: Fn(usize) -> usize
 {
     let size = width * height;
 
@@ -107,7 +107,7 @@ pub fn find_path<F>(width: usize,
     }
 
     // best_paths: (reward, starting points), tile, child_index
-    let mut stack: Vec<(Vec<(usize, Vec<usize>)>, usize, usize)> = Vec::new();
+    let mut stack: Vec<(Paths, usize, usize)> = Vec::new();
     let combine =
         if branch {
             combine_branch
