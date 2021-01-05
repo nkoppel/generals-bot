@@ -35,17 +35,19 @@ fn combine_simple(_: isize, _: usize, paths1: &mut Paths, paths2: Paths) {
 
 fn combine_branch(reward: isize, cost: usize, paths1: &mut Paths, paths2: Paths) {
     let len = paths1.len();
+    let mut out = paths1.clone();
 
-    for i in cost..len {
+    for i in cost + 1..len {
         for j in cost + 1..cost + len - i {
             let k = i + j - cost;
             let path = (paths1[i].0 + paths2[j].0 - reward, paths1[i].1.iter().copied().chain(paths2[j].1.iter().copied()).collect());
 
-            better_path(&mut paths1[k], path);
+            better_path(&mut out[k], path);
         }
     }
 
-    combine_simple(0, 0, paths1, paths2);
+    combine_simple(0, 0, &mut out, paths2);
+    *paths1 = out;
 }
 
 use std::collections::VecDeque;
@@ -56,52 +58,72 @@ pub fn find_path<F1, F2>(width: usize,
                          branch: bool,
                          max_cost: usize,
                          reward_func: F1,
-                         cost_func: F2) -> Paths
+                         cost_func: F2) -> (Paths, Vec<usize>)
     where F1: Fn(usize) -> isize, F2: Fn(usize) -> usize
 {
     let size = width * height;
 
-    let mut queue = VecDeque::new();
+    let mut neighbor_search = vec![Vec::new(); max_cost + 1];
+    let mut n = 0;
+    let mut queue = Vec::new();
     let mut path_reward = vec![0; size];
     let mut path_cost = vec![usize::MAX; size];
     let mut parents = vec![usize::MAX; size];
     let mut children = vec![Vec::new(); size];
 
-    queue.push_back(start);
+    path_cost[start] = cost_func(start);
+    path_reward[start] = reward_func(start);
+    neighbor_search[0].push(start);
     let mut curr_cost = 0;
 
-    while let Some(tile) = queue.pop_front() {
-        let reward = reward_func(tile);
-        let cost = cost_func(tile);
-
-        if cost > max_cost || path_cost[tile] != usize::MAX {
-            continue;
+    loop {
+        while n <= max_cost && neighbor_search[n].is_empty() {
+            n += 1;
         }
 
-        let mut best_neighbor = usize::MAX;
+        if n > max_cost {
+            break;
+        }
 
-        for n in get_neighbors(width, height, tile) {
-            if best_neighbor > size ||
-                cost_func(n) < cost_func(best_neighbor) ||
-                (cost_func(n) == cost_func(best_neighbor) &&
-                reward_func(n) > reward_func(best_neighbor))
-            {
-                best_neighbor = n;
+        queue.clear();
+
+        for tile in &neighbor_search[n] {
+            queue.extend(get_neighbors(width, height, *tile).into_iter());
+        }
+
+        neighbor_search[n].clear();
+
+        for tile in queue.iter().copied() {
+            let reward = reward_func(tile);
+            let cost = cost_func(tile);
+
+            if cost > max_cost || path_cost[tile] != usize::MAX {
+                continue;
             }
-        }
 
-        if best_neighbor >= size {
-            continue;
-        }
+            let mut best_neighbor = usize::MAX;
 
-        path_reward[tile] = path_reward[best_neighbor] + reward;
-        path_cost[tile] = path_cost[best_neighbor] + cost;
-        parents[tile] = best_neighbor;
-        children[best_neighbor].push(tile);
-
-        if path_cost[tile] < max_cost {
             for n in get_neighbors(width, height, tile) {
-                queue.push_back(n);
+                if best_neighbor > size ||
+                    path_cost[n] < path_cost[best_neighbor] ||
+                    (path_cost[n] == path_cost[best_neighbor] &&
+                     path_reward[n] > path_reward[best_neighbor])
+                {
+                    best_neighbor = n;
+                }
+            }
+
+            if best_neighbor >= size {
+                continue;
+            }
+
+            path_reward[tile] = path_reward[best_neighbor] + reward;
+            path_cost[tile] = path_cost[best_neighbor] + cost;
+            parents[tile] = best_neighbor;
+            children[best_neighbor].push(tile);
+
+            if path_cost[tile] <= max_cost {
+                neighbor_search[path_cost[tile]].push(tile);
             }
         }
     }
@@ -116,7 +138,7 @@ pub fn find_path<F1, F2>(width: usize,
         };
 
     let mut paths = vec![(0, Vec::new()); max_cost + 1];
-    paths[0] = (reward_func(start), vec![start]);
+    paths[cost_func(start)] = (reward_func(start), vec![start]);
 
     stack.push((paths, start, 0));
 
@@ -136,5 +158,127 @@ pub fn find_path<F1, F2>(width: usize,
         }
     }
 
-    stack.pop().unwrap().0
+    (stack.pop().unwrap().0, parents)
+}
+
+pub fn debug_print_parents(width: usize, parents: Vec<usize>) {
+    for y in 0..parents.len() / width {
+        for x in 0..width {
+            let i = x + y * width;
+            let d = i as isize - parents[i] as isize;
+
+            if d == -1 {
+                print!("> ");
+            } else if d == 1 {
+                print!("< ");
+            } else if d == width as isize {
+                print!("^ ");
+            } else if d == -(width as isize) {
+                print!("v ");
+            } else {
+                print!(". ");
+            }
+        }
+        println!();
+    }
+    println!();
+}
+
+pub fn debug_print_reward(width: usize, array: Vec<isize>) {
+    for y in 0..array.len() / width {
+        for x in 0..width {
+            let i = x + y * width;
+
+            print!("{} ", array[i]);
+        }
+        println!();
+    }
+    println!();
+}
+
+#[derive(Clone, Debug)]
+pub struct PathTree {
+    loc: usize,
+    priority: isize,
+    children: Vec<PathTree>
+}
+
+impl PathTree {
+    fn new(loc: usize) -> Self {
+        Self {
+            loc,
+            priority: 0,
+            children: Vec::new()
+        }
+    }
+
+    pub fn from_path(path: Path, parents: Vec<usize>) -> Self {
+        let mut paths = vec![Vec::new(); path.1.len()];
+
+        for (i, mut loc) in path.1.into_iter().enumerate() {
+            while loc != usize::MAX {
+                paths[i].push(loc);
+                loc = parents[loc];
+            }
+        }
+
+        let mut out = Self::new(0);
+        let mut pointer = &mut out;
+
+        for path in paths {
+            for p in path.iter().rev() {
+                if let Some(pos) = pointer.children.iter().position(|x| *p == x.loc) {
+                    pointer = &mut pointer.children[pos];
+                } else {
+                    pointer.children.push(Self::new(*p));
+                    pointer = pointer.children.last_mut().unwrap();
+                }
+            }
+
+            pointer = &mut out;
+        }
+
+        out.children.into_iter().next().unwrap()
+    }
+
+    pub fn apply_priority<F>(&mut self, pri_func: &F) where F: Fn(usize) -> isize {
+        for c in &mut self.children {
+            c.apply_priority(pri_func);
+        }
+
+        self.priority = self.children.iter().map(|x| x.priority).sum();
+        self.priority += pri_func(self.loc);
+
+        self.children.sort_unstable_by_key(|x| x.priority);
+    }
+
+    pub fn serialize_inwards(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+
+        for c in &self.children {
+            out.extend(c.serialize_inwards().into_iter());
+            out.push(self.loc);
+        }
+
+        if self.children.is_empty() {
+            out.push(self.loc);
+        }
+
+        out
+    }
+
+    pub fn serialize_outwards(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+
+        if self.children.is_empty() {
+            out.push(self.loc);
+        }
+
+        for c in &self.children {
+            out.push(self.loc);
+            out.extend(c.serialize_outwards().into_iter());
+        }
+
+        out
+    }
 }
