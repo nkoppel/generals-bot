@@ -7,36 +7,36 @@ use state::*;
 use simulator::*;
 use bots::*;
 use client::*;
-use bots::path_optimization::*;
 
 use std::env;
 
 fn main() {
-    // let args: Vec<String> = env::args().collect();
-    // let mut client = Client::new("ws://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
+    let args: Vec<String> = env::args().collect();
+    let mut client = Client::new("ws://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
-    // client.join_private(&args[2]);
+    client.join_private(&args[2]);
 
-    // client.run_player(Box::new(RandomBot::new()));
-    // client.debug_listen();
+    // client.run_player(Box::new(SmartBot::new()));
+    client.debug_listen();
 
-    let mut rng = thread_rng();
+    // let mut rng = thread_rng();
     
-    // let cost = vec![1; 81];
-    let reward: Vec<isize> = (0..81).map(|_| rng.gen_range(0, 10)).collect();
+    // for i in 0..1000 {
+        // let reward: Vec<isize> = (0..10201).map(|_| rng.gen_range(0, 10)).collect();
 
-    debug_print_reward(9, reward.clone());
+        // // debug_print_reward(51, reward.clone());
 
-    let cost_func = |_| 1;
-    let reward_func = move |i| reward[i];
+        // let cost_func = |_| 1;
+        // let reward_func = |i| reward[i];
 
-    let (paths, parents) = find_path(9, 9, 40, true, 9, reward_func, cost_func);
+        // let (paths, parents) = find_path(101, 101, 5100, true, 20, reward_func, cost_func);
 
-    println!("{:?}", paths);
-    println!();
-    debug_print_parents(9, parents.clone());
+        // // println!("{:?}", paths);
+        // // println!();
+        // // debug_print_parents(51, parents.clone());
 
-    let tree = PathTree::from_path(paths[9].clone(), parents);
+        // let tree = PathTree::from_path(&paths[20].clone(), &parents);
 
-    println!("{:?}", tree.serialize_inwards());
+        // // println!("{:?}", tree.serialize_inwards());
+    // }
 }

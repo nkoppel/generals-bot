@@ -57,9 +57,40 @@ impl Client {
     pub fn join_private(&mut self, game_id: &str) {
         self.send_message(vec!["join_private", game_id, &self.id.clone()]);
 
-        self.socket.write_message(Text(
-            format!("42[\"set_force_start\",\"{}\",true]", game_id)
-        ));
+        self.set_force_start(game_id);
+    }
+
+    pub fn set_force_start(&mut self, game_id: &str) {
+        let msg = Text(format!("42[\"set_force_start\",\"{}\",true]", game_id));
+        let second = time::Duration::from_millis(1000);
+
+        self.ping();
+        self.socket.write_message(msg.clone());
+
+        loop {
+            match self.socket.read_message() {
+                Ok(Pong(_)) => {
+                    thread::sleep(second);
+                    self.ping();
+                    self.socket.write_message(msg.clone());
+                },
+                Err(_) | Ok(Close(_)) => break,
+                Ok(Text(s)) => {
+                    if let Ok(Value::Array(val)) = serde_json::from_str(&s[2..]) {
+                        if val[0] == Value::String("queue_update".to_string()) {
+                            if let Some(map) = val[1].as_object() {
+                                if let Some(Value::Bool(b)) = map.get("isForcing") {
+                                    if *b {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn debug_listen(&mut self) {

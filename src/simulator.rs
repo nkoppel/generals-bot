@@ -8,6 +8,47 @@ fn from_1d(width: usize, loc: isize) -> (isize, isize) {
     (loc % width as isize, loc / width as isize)
 }
 
+pub fn get_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let size = width * height;
+
+    if loc >= width {
+        out.push(loc - width);
+    }
+    if loc + width < size {
+        out.push(loc + width);
+    }
+    if loc > 0 && loc / width == (loc - 1) / width {
+        out.push(loc - 1);
+    }
+    if loc < size && loc / width == (loc + 1) / width {
+        out.push(loc + 1);
+    }
+
+    out
+}
+
+pub fn get_vis_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+
+    let iwidth = width as isize;
+    let mut ds = vec![1, iwidth - 1, iwidth, iwidth + 1];
+
+    ds.extend(ds.clone().iter().map(|x| -*x));
+
+    let size = width * height;
+
+    for d in ds {
+        let loc2 = loc as isize + d;
+
+        if loc2 >= 0 && loc2 < size as isize {
+            out.push(loc2 as usize);
+        }
+    }
+
+    out
+}
+
 impl State {
     pub fn update_scores(&mut self) {
         self.scores = vec![(0, 0); self.generals.len()];
@@ -90,6 +131,12 @@ impl State {
         } else if self.turn % 2 == 0 {
             for i in &self.cities {
                 if self.terrain[*i as usize] >= 0 {
+                    self.armies[*i as usize] += 1;
+                }
+            }
+
+            for i in &self.generals {
+                if *i >= 0 && self.terrain[*i as usize] >= 0 {
                     self.armies[*i as usize] += 1;
                 }
             }
@@ -186,21 +233,13 @@ impl State {
             start += 1;
         }
 
-        let ds = vec![-1, 1, -(self.width as isize), self.width as isize]
-            .into_iter()
-            .filter(|d| {
-                    let end = (start as isize + d) as usize;
+        let neighbors = get_neighbors(self.width, self.height, start);
 
-                    self.move_is_valid(player, Move::new(start, end, false)) 
-            })
-            .collect::<Vec<_>>();
-
-        if ds.is_empty() {
+        if neighbors.is_empty() {
             return None;
         }
 
-        let d = ds[rng.gen_range(0, ds.len())];
-        let end = (start as isize + d) as usize;
+        let end = neighbors[rng.gen_range(0, neighbors.len())];
 
         Some(Move::new(start, end, false))
     }

@@ -74,6 +74,10 @@ impl Move {
     pub fn new(start: usize, end: usize, is50: bool) -> Self {
         Move{start, end, is50}
     }
+
+    pub fn not50(start: usize, end: usize) -> Self {
+        Move{start, end, is50: false}
+    }
 }
 
 #[derive(Clone, Debug)]

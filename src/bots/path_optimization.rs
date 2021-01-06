@@ -1,22 +1,4 @@
-fn get_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
-    let mut out = Vec::new();
-    let size = width * height;
-
-    if loc >= width {
-        out.push(loc - width);
-    }
-    if loc + width < size {
-        out.push(loc + width);
-    }
-    if loc > 0 && loc / width == (loc - 1) / width {
-        out.push(loc - 1);
-    }
-    if loc < size && loc / width == (loc + 1) / width {
-        out.push(loc + 1);
-    }
-
-    out
-}
+use super::*;
 
 type Path = (isize, Vec<usize>);
 type Paths = Vec<Path>;
@@ -49,8 +31,6 @@ fn combine_branch(reward: isize, cost: usize, paths1: &mut Paths, paths2: Paths)
     combine_simple(0, 0, &mut out, paths2);
     *paths1 = out;
 }
-
-use std::collections::VecDeque;
 
 pub fn find_path<F1, F2>(width: usize,
                          height: usize,
@@ -143,6 +123,9 @@ pub fn find_path<F1, F2>(width: usize,
     stack.push((paths, start, 0));
 
     while let Some((mut paths, tile, child)) = stack.pop() {
+        if path_cost[tile] > max_cost {
+            continue;
+        }
         if paths.is_empty() {
             paths = vec![(0, Vec::new()); max_cost + 1];
             paths[path_cost[tile]] = (path_reward[tile], vec![tile]);
@@ -203,6 +186,21 @@ pub struct PathTree {
     children: Vec<PathTree>
 }
 
+pub fn get_sequences(path: &Path, parents: &Vec<usize>) -> Vec<Vec<usize>> {
+    let mut out = vec![Vec::new(); path.1.len()];
+
+    for (i, l) in path.1.iter().enumerate() {
+        let mut loc = *l;
+
+        while loc != usize::MAX {
+            out[i].push(loc);
+            loc = parents[loc];
+        }
+    }
+
+    out
+}
+
 impl PathTree {
     fn new(loc: usize) -> Self {
         Self {
@@ -212,15 +210,8 @@ impl PathTree {
         }
     }
 
-    pub fn from_path(path: Path, parents: Vec<usize>) -> Self {
-        let mut paths = vec![Vec::new(); path.1.len()];
-
-        for (i, mut loc) in path.1.into_iter().enumerate() {
-            while loc != usize::MAX {
-                paths[i].push(loc);
-                loc = parents[loc];
-            }
-        }
+    pub fn from_path(path: &Path, parents: &Vec<usize>) -> Self {
+        let paths = get_sequences(path, parents);
 
         let mut out = Self::new(0);
         let mut pointer = &mut out;
@@ -252,30 +243,22 @@ impl PathTree {
         self.children.sort_unstable_by_key(|x| x.priority);
     }
 
-    pub fn serialize_inwards(&self) -> Vec<usize> {
+    pub fn serialize_inwards(&self) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
 
         for c in &self.children {
             out.extend(c.serialize_inwards().into_iter());
-            out.push(self.loc);
-        }
-
-        if self.children.is_empty() {
-            out.push(self.loc);
+            out.push((c.loc, self.loc));
         }
 
         out
     }
 
-    pub fn serialize_outwards(&self) -> Vec<usize> {
+    pub fn serialize_outwards(&self) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
 
-        if self.children.is_empty() {
-            out.push(self.loc);
-        }
-
         for c in &self.children {
-            out.push(self.loc);
+            out.push((self.loc, c.loc));
             out.extend(c.serialize_outwards().into_iter());
         }
 
