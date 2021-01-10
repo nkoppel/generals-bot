@@ -21,7 +21,17 @@ impl Player for RandomBot {
 
     fn get_move(&mut self, diff: StateDiff) -> Option<Move> {
         self.state.patch(diff);
-        println!("{}", self.state);
+        // println!("{}", self.state);
         self.state.get_random_move(self.player)
+    }
+}
+
+pub struct NoneBot{}
+
+impl Player for NoneBot {
+    fn init(&mut self, _: &Vec<usize>, _: usize) {}
+
+    fn get_move(&mut self, _: StateDiff) -> Option<Move> {
+        None
     }
 }

@@ -16,10 +16,10 @@ fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
     let mut i = 0;
     let mut j = 0;
 
-    while i < old.len() || start {
+    while (i < old.len() && i < new.len()) || start {
         start = false;
 
-        while i < old.len() && old[i] == new[i] {
+        while i < old.len() && i < new.len() && old[i] == new[i] {
             j += 1;
             i += 1;
         }
@@ -125,9 +125,13 @@ impl State {
         out.terrain = vec![TILE_FOG; size];
 
         for i in 0..self.terrain.len() {
-            if self.terrain[i] == TILE_MOUNTAIN || self.cities[i] >= 0 {
+            if self.terrain[i] == TILE_MOUNTAIN {
                 out.terrain[i] = TILE_FOG_OBSTACLE;
             }
+        }
+
+        for i in &self.cities {
+            out.terrain[*i as usize] = TILE_FOG_OBSTACLE;
         }
 
         out
@@ -223,6 +227,10 @@ impl State {
 fn pad_front(c: char, len: usize, s: &str) -> String {
     let mut out = String::new();
 
+    if s.len() > len {
+        return s.to_string();
+    }
+
     for _ in 0..len - s.len() {
         out.push(c);
     }
@@ -240,6 +248,8 @@ use colored::Color::*;
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let player_colors = vec![Red, Blue, Green, Cyan, Magenta];
+
+        writeln!(f, "{}", self.turn)?;
 
         for y in 0..self.height {
             for x in 0..self.width {

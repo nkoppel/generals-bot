@@ -49,6 +49,37 @@ pub fn get_vis_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> 
     out
 }
 
+pub fn select_rand_eq<T>(vec: &Vec<T>, item: &T) -> Option<usize>
+    where T: PartialEq
+{
+    let mut num_eq = 0;
+
+    for i in vec.iter() {
+        if *i == *item {
+            num_eq += 1;
+        }
+    }
+
+    if num_eq == 0 {
+        return None;
+    }
+
+    let mut rng = thread_rng();
+
+    let n = rng.gen_range(0, num_eq);
+    let mut j = 0;
+
+    for i in 0..vec.len() {
+        if j == n {
+            return Some(i);
+        } else if vec[i] == *item {
+            j += 1;
+        }
+    }
+
+    None
+}
+
 impl State {
     pub fn update_scores(&mut self) {
         self.scores = vec![(0, 0); self.generals.len()];
@@ -213,26 +244,9 @@ impl State {
     }
 
     pub fn get_random_move(&mut self, player: usize) -> Option<Move> {
-        let player_tiles = self.scores[player].0;
-
         let mut rng = thread_rng();
 
-        let tile = rng.gen_range(0, player_tiles);
-        let mut start = 0;
-        let mut j = 0;
-
-        while start < self.terrain.len() {
-            if self.terrain[start] == player as isize {
-                if j == tile {
-                    break;
-                }
-
-                j += 1;
-            }
-
-            start += 1;
-        }
-
+        let start = select_rand_eq(&self.terrain, &(player as isize)).unwrap();
         let neighbors = get_neighbors(self.width, self.height, start);
 
         if neighbors.is_empty() {
@@ -249,6 +263,9 @@ pub trait Player {
     fn init(&mut self, teams: &Vec<usize>, player: usize);
     fn get_move(&mut self, diff: StateDiff) -> Option<Move>;
 }
+
+use std::thread;
+use std::time::{self, Duration, Instant};
 
 pub struct Simulator {
     state: State,
@@ -272,8 +289,12 @@ impl Simulator {
         }
     }
 
-    pub fn sim(&mut self, rounds: usize) -> Option<usize> {
-        // println!("{}", self.state);
+    pub fn sim(&mut self, rounds: usize, wait: usize) -> Option<usize> {
+        println!("{}", self.state);
+
+        let wait = Duration::from_millis(wait as u64);
+
+        self.state.incr_armies();
 
         for _ in 0..rounds {
             self.state.incr_armies();
@@ -284,6 +305,8 @@ impl Simulator {
             let mut active_players = 0;
             let mut last_active = 0;
 
+            let time_spent = Instant::now();
+
             for player in 0..self.state.generals.len() {
                 if self.state.generals[player] >= 0 {
                     let player_state = self.state.get_player_state(player);
@@ -291,12 +314,8 @@ impl Simulator {
 
                     let mov = self.players[player].get_move(diff);
 
-                    // println!("{:?}", mov);
+                    println!("{:?}", mov);
                     moves.push(mov);
-
-                    if let Some(m) = mov {
-                        debug_assert!(state.move_is_valid(player, m));
-                    }
 
                     self.player_states[player] = player_state;
                     active_players += 1;
@@ -318,7 +337,9 @@ impl Simulator {
 
             self.state = state;
 
-            // println!("{}", self.state);
+            println!("{}", self.state);
+
+            thread::sleep(wait.saturating_sub(time_spent.elapsed()));
         }
 
         None

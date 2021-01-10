@@ -265,3 +265,50 @@ impl PathTree {
         out
     }
 }
+
+use std::collections::VecDeque;
+
+// < 0: obstacle, > 0: object to measure distance from
+pub fn min_distance(width: usize, map: &Vec<isize>) -> Vec<usize> {
+    let height = map.len() / width;
+    let mut queue = VecDeque::new();
+    let mut out = vec![usize::MAX; map.len()];
+
+    for i in 0..map.len() {
+        if map[i] > 0 {
+            out[i] = 0;
+            queue.push_back(i);
+        }
+    }
+
+    while let Some(tile) = queue.pop_front() {
+        for n in get_neighbors(width, height, tile) {
+            if out[n] != usize::MAX && map[n] >= 0 {
+                out[n] = out[tile] + 1;
+                queue.push_back(n);
+            }
+        }
+    }
+
+    return out;
+}
+
+pub fn nearest(width: usize, distance: &Vec<usize>, mut loc: usize) -> usize {
+    let height = distance.len() / width;
+
+    loop {
+        let mut best = loc;
+
+        for n in get_neighbors(width, height, loc) {
+            if distance[n] < distance[best] {
+                best = n;
+            }
+        }
+
+        if best == loc {
+            return loc;
+        } else {
+            loc = best;
+        }
+    }
+}
