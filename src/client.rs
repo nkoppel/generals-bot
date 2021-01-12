@@ -60,6 +60,10 @@ impl Client {
         self.set_force_start(game_id);
     }
 
+    pub fn join_1v1(&mut self) {
+        self.send_message(vec!["join_1v1", &self.id.clone()]);
+    }
+
     pub fn set_force_start(&mut self, game_id: &str) {
         let msg = Text(format!("42[\"set_force_start\",\"{}\",true]", game_id));
         let second = time::Duration::from_millis(1000);
@@ -137,7 +141,7 @@ impl Client {
                             } else if c == "game_lost" {
                                 return Err(GameLost);
                             } else if c == "game_update" {
-                                println!("{}", s);
+                                // println!("{}", s);
                                 return Ok(diff_from_value(&arr[1]));
                             }
                         }
@@ -183,7 +187,7 @@ impl Client {
         println!("Entering new {} match.", start.game_type);
         println!("Players: {}.", start.usernames.join(" | "));
         println!("Replay will be available at http://bot.generals.io/replays/{}", start.replay_id);
-        player.init(&start.teams, start.playerIndex);
+        player.init(start.playerIndex);
 
         while let Ok(diff) = tmp {
             let mov = player.get_move(diff);
@@ -238,7 +242,6 @@ pub struct GameStart {
     pub playerIndex: usize,
     pub replay_id: String,
     pub swamps: Vec<isize>,
-    pub teams: Vec<usize>,
     pub usernames: Vec<String>
 }
 
@@ -248,7 +251,7 @@ impl Drop for Client {
 
         let mut tmp = self.socket.read_message();
 
-        for i in 0..1000 {
+        for _ in 0..1000 {
             if let Err(ConnectionClosed) = tmp {
                 break;
             }

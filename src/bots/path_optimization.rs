@@ -1,7 +1,7 @@
 use super::*;
 
-type Path = (isize, Vec<usize>);
-type Paths = Vec<Path>;
+pub type Path = (isize, Vec<usize>);
+pub type Paths = Vec<Path>;
 
 fn better_path(p1: &mut Path, p2: Path) {
     if p2.0 > p1.0 {
@@ -32,78 +32,58 @@ fn combine_branch(reward: isize, cost: usize, paths1: &mut Paths, paths2: Paths)
     *paths1 = out;
 }
 
-pub fn find_path<F1, F2>(width: usize,
-                         height: usize,
-                         start: usize,
-                         branch: bool,
-                         max_cost: usize,
-                         reward_func: F1,
-                         cost_func: F2) -> (Paths, Vec<usize>)
-    where F1: Fn(usize) -> isize, F2: Fn(usize) -> usize
-{
-    let size = width * height;
+use std::collections::{VecDeque, BinaryHeap};
 
-    let mut neighbor_search = vec![Vec::new(); max_cost + 1];
-    let mut n = 0;
-    let mut queue = Vec::new();
-    let mut path_reward = vec![0; size];
+pub fn find_path<F1>(width: usize,
+                     start: usize,
+                     branch: bool,
+                     max_cost: usize,
+                     reward_func: F1,
+                     obstacles: &Vec<bool>) -> (Paths, Vec<usize>)
+    where F1: Fn(usize) -> isize
+{
+    let size = obstacles.len();
+    let height = size / width;
+
     let mut path_cost = vec![usize::MAX; size];
+    let mut path_reward = vec![isize::MIN; size];
     let mut parents = vec![usize::MAX; size];
     let mut children = vec![Vec::new(); size];
 
-    path_cost[start] = cost_func(start);
+    let mut queue: BinaryHeap<(isize, usize)> = BinaryHeap::new();
+    let mut avg_reward = reward_func(start) as f64;
+    let mut n_searched = 1.;
+
     path_reward[start] = reward_func(start);
-    neighbor_search[0].push(start);
-    let mut curr_cost = 0;
+    path_cost[start] = 0;
+    queue.push((0, start));
 
-    loop {
-        while n <= max_cost && neighbor_search[n].is_empty() {
-            n += 1;
+    while let Some((_, loc)) = queue.pop() {
+        if path_cost[loc] > max_cost {
+            continue;
         }
 
-        if n > max_cost {
-            break;
-        }
+        for n in get_neighbors(width, height, loc) {
+            if !obstacles[n] && path_reward[n] == isize::MIN {
+                let reward = reward_func(n);
 
-        queue.clear();
+                path_reward[n] = path_reward[loc] + reward;
+                path_cost[n] = path_cost[loc] + 1;
 
-        for tile in &neighbor_search[n] {
-            queue.extend(get_neighbors(width, height, *tile).into_iter());
-        }
+                children[loc].push(n);
+                parents[n] = loc;
 
-        neighbor_search[n].clear();
+                avg_reward =
+                    avg_reward * (n_searched - 1.) / n_searched +
+                    reward as f64 / n_searched;
 
-        for tile in queue.iter().copied() {
-            let reward = reward_func(tile);
-            let cost = cost_func(tile);
+                n_searched += 1.;
 
-            if cost > max_cost || path_cost[tile] != usize::MAX {
-                continue;
-            }
+                let h =
+                    path_reward[n] -
+                    (2. * path_cost[n] as f64 * avg_reward) as isize;
 
-            let mut best_neighbor = usize::MAX;
-
-            for n in get_neighbors(width, height, tile) {
-                if best_neighbor > size ||
-                    path_cost[n] < path_cost[best_neighbor] ||
-                    (path_cost[n] == path_cost[best_neighbor] &&
-                     path_reward[n] > path_reward[best_neighbor])
-                {
-                    best_neighbor = n;
-                }
-            }
-
-            if best_neighbor >= size {
-                continue;
-            }
-
-            path_reward[tile] = path_reward[best_neighbor] + reward;
-            path_cost[tile] = path_cost[best_neighbor] + cost;
-            parents[tile] = best_neighbor;
-            children[best_neighbor].push(tile);
-
-            if path_cost[tile] <= max_cost {
-                neighbor_search[path_cost[tile]].push(tile);
+                queue.push((h, n));
             }
         }
     }
@@ -117,17 +97,17 @@ pub fn find_path<F1, F2>(width: usize,
             combine_simple
         };
 
-    let mut paths = vec![(0, Vec::new()); max_cost + 1];
-    paths[cost_func(start)] = (reward_func(start), vec![start]);
+    let mut paths = vec![(0, Vec::new()); max_cost];
+    paths[0] = (reward_func(start), vec![start]);
 
     stack.push((paths, start, 0));
 
     while let Some((mut paths, tile, child)) = stack.pop() {
-        if path_cost[tile] > max_cost {
+        if path_cost[tile] >= max_cost {
             continue;
         }
         if paths.is_empty() {
-            paths = vec![(0, Vec::new()); max_cost + 1];
+            paths = vec![(0, Vec::new()); max_cost];
             paths[path_cost[tile]] = (path_reward[tile], vec![tile]);
         }
         if child < children[tile].len() {
@@ -167,12 +147,14 @@ pub fn debug_print_parents(width: usize, parents: Vec<usize>) {
     println!();
 }
 
-pub fn debug_print_reward(width: usize, array: Vec<isize>) {
+pub fn debug_print_reward<T>(width: usize, array: Vec<T>)
+    where T: std::fmt::Display
+{
     for y in 0..array.len() / width {
         for x in 0..width {
             let i = x + y * width;
 
-            print!("{} ", array[i]);
+            print!("{:5} ", array[i]);
         }
         println!();
     }
@@ -266,8 +248,6 @@ impl PathTree {
     }
 }
 
-use std::collections::VecDeque;
-
 // < 0: obstacle, > 0: object to measure distance from
 pub fn min_distance(width: usize, map: &Vec<isize>) -> Vec<usize> {
     let height = map.len() / width;
@@ -283,7 +263,7 @@ pub fn min_distance(width: usize, map: &Vec<isize>) -> Vec<usize> {
 
     while let Some(tile) = queue.pop_front() {
         for n in get_neighbors(width, height, tile) {
-            if out[n] != usize::MAX && map[n] >= 0 {
+            if out[n] == usize::MAX && map[n] >= 0 {
                 out[n] = out[tile] + 1;
                 queue.push_back(n);
             }
@@ -293,8 +273,14 @@ pub fn min_distance(width: usize, map: &Vec<isize>) -> Vec<usize> {
     return out;
 }
 
-pub fn nearest(width: usize, distance: &Vec<usize>, mut loc: usize) -> usize {
+pub fn nearest(width: usize, distance: &Vec<usize>, mut loc: usize)
+    -> Option<usize>
+{
     let height = distance.len() / width;
+
+    if distance[loc] == usize::MAX {
+        return None;
+    }
 
     loop {
         let mut best = loc;
@@ -306,7 +292,7 @@ pub fn nearest(width: usize, distance: &Vec<usize>, mut loc: usize) -> usize {
         }
 
         if best == loc {
-            return loc;
+            return Some(loc);
         } else {
             loc = best;
         }

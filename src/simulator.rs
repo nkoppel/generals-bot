@@ -66,14 +66,15 @@ pub fn select_rand_eq<T>(vec: &Vec<T>, item: &T) -> Option<usize>
 
     let mut rng = thread_rng();
 
-    let n = rng.gen_range(0, num_eq);
+    let n = rng.gen_range(0, num_eq) + 1;
     let mut j = 0;
 
     for i in 0..vec.len() {
+        if vec[i] == *item {
+            j += 1;
+        }
         if j == n {
             return Some(i);
-        } else if vec[i] == *item {
-            j += 1;
         }
     }
 
@@ -177,6 +178,7 @@ impl State {
     }
 
     fn capture_player(&mut self, p1: usize, p2: usize) {
+        self.cities.push(self.generals[p2]);
         self.generals[p2] = -2;
 
         for t in self.terrain.iter_mut() {
@@ -260,12 +262,12 @@ impl State {
 }
 
 pub trait Player {
-    fn init(&mut self, teams: &Vec<usize>, player: usize);
+    fn init(&mut self, player: usize);
     fn get_move(&mut self, diff: StateDiff) -> Option<Move>;
 }
 
 use std::thread;
-use std::time::{self, Duration, Instant};
+use std::time::{Duration, Instant};
 
 pub struct Simulator {
     state: State,
@@ -276,10 +278,9 @@ pub struct Simulator {
 impl Simulator {
     pub fn new(state: State, mut players: Vec<Box<dyn Player>>) -> Self {
         let player_states = vec![State::new(); state.generals.len()];
-        let teams = (1..players.len() + 1).collect::<Vec<_>>();
 
         for i in 0..players.len() {
-            players[i].init(&teams, i);
+            players[i].init(i);
         }
 
         Self {

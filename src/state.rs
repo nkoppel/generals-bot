@@ -8,8 +8,6 @@ pub use rand::random;
 pub use rand::Rng;
 pub use rand::seq::SliceRandom;
 
-use serde_json::Value;
-
 fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
     let mut out = Vec::new();
     let mut start = true;
@@ -75,8 +73,15 @@ impl Move {
         Move{start, end, is50}
     }
 
-    pub fn not50(start: usize, end: usize) -> Self {
+    pub fn tup((start, end): (usize, usize)) -> Self {
         Move{start, end, is50: false}
+    }
+
+    pub fn opt(mov: Option<(usize, usize)>) -> Option<Self> {
+        match mov {
+            None => None,
+            Some(m) => Some(Self::tup(m))
+        }
     }
 }
 

@@ -15,7 +15,7 @@ impl RandomBot {
 }
 
 impl Player for RandomBot {
-    fn init(&mut self, _: &Vec<usize>, player: usize) {
+    fn init(&mut self, player: usize) {
         self.player = player;
     }
 
@@ -29,7 +29,7 @@ impl Player for RandomBot {
 pub struct NoneBot{}
 
 impl Player for NoneBot {
-    fn init(&mut self, _: &Vec<usize>, _: usize) {}
+    fn init(&mut self, _: usize) {}
 
     fn get_move(&mut self, _: StateDiff) -> Option<Move> {
         None
