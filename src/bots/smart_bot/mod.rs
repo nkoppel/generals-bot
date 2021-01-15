@@ -4,6 +4,16 @@ use std::collections::{VecDeque, HashSet};
 use std::mem;
 use std::time::{Duration, Instant};
 
+mod path_optimization;
+mod strategy;
+
+use path_optimization::*;
+pub use strategy::*;
+
+const PROBE_LOOKAHEAD: usize = 10;
+const FL_ATTEMPTS: usize = 10;
+
+#[derive(Clone, Copy, Debug)]
 enum BotMode {
     Adj_land,
     Gather_for(usize, usize, bool, bool), // time, loc, hide, nocapital
@@ -163,6 +173,39 @@ impl SmartBot {
         nearest(self.state.width, &dist_field, t)
     }
 
+    fn find_probe_loc(&self, player: usize) -> Option<usize> {
+        let mut map: Vec<isize> = self.state.terrain
+            .iter()
+            .enumerate()
+            .map(|(i, x)|
+                if *x == self.player as isize {
+                    for n in get_vis_neighbors(self.state.width, self.state.height, i) {
+                        if self.state.terrain[n] == player as isize {
+                            return 0;
+                        }
+                    }
+
+                    1
+                } else if *x == -2 || *x == -4 {
+                    -1
+                } else {
+                    0
+                }
+            )
+            .collect();
+
+        for c in &self.state.cities {
+            if map[*c as usize] < 0 {
+                map[*c as usize] = -1;
+            }
+        }
+
+        let dist_field = min_distance(self.state.width, &map);
+        let t = select_rand_eq(&self.seen_terrain, &(player as isize))?;
+
+        nearest(self.state.width, &dist_field, t)
+    }
+
     fn find_nearest_city(&self, loc: usize) -> Option<usize> {
         let mut map: Vec<isize> = self.state.terrain
             .iter()
@@ -178,8 +221,73 @@ impl SmartBot {
         nearest(self.state.width, &dist, loc)
     } 
 
+    fn get_seen_dist(&self, player: usize) -> Vec<usize> {
+        // w = 1/16
+        
+        let map = self.seen_terrain
+            .iter()
+            .map(|x| {
+                if *x == -2 || *x == -4 {
+                    -1
+                } else if *x == -3 {
+                    0
+                } else if *x == player as isize {
+                    1
+                } else {
+                    -1
+                }
+            })
+            .collect::<Vec<isize>>();
+
+        min_distance(self.state.width, &map)
+    }
+
+    fn probe(&self, loc: usize, player: usize) -> Option<(usize, usize)> {
+        if self.state.terrain[loc] != self.player as isize {
+            return None;
+        }
+
+        let rew = self.get_seen_dist(player)
+            .iter()
+            .zip(self.state.armies.iter())
+            .zip(self.state.terrain.iter())
+            .map(|((mut dist, armies), t)| {
+                if *dist > PROBE_LOOKAHEAD {
+                    if *t == self.player as isize {
+                        armies - 1000000
+                    } else {
+                        -armies - 1000000
+                    }
+                } else {
+                    *dist as isize - armies
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let reward = move |i| rew[i];
+
+        let obstacles = self.state.terrain
+            .iter()
+            .map(|i| *i == -2 || *i == -4)
+            .collect::<Vec<_>>();
+
+        let (paths, parents) =
+            find_path(self.state.width, loc, false, PROBE_LOOKAHEAD, reward, &obstacles);
+        let tree = PathTree::from_path(paths.last().unwrap(), &parents);
+
+        if let Some(mov) = tree.serialize_outwards().first() {
+            if self.state.terrain[mov.1] == player as isize &&
+               self.state.armies[mov.0] - 1 < self.state.armies[mov.1] 
+            {
+                return Some(*mov);
+            }
+        }
+
+        None
+    }
+
     fn fast_land(&mut self, time: usize) {
-        for _ in 0..10 {
+        for _ in 0..FL_ATTEMPTS {
             if let Some(loc) = self.find_strand_loc(5) {
                 let (paths, _, _) = self.gather(time - 1, loc, false, self.state.turn >= 100);
 
@@ -308,13 +416,15 @@ impl SmartBot {
             match mode {
                 Adj_land => Move::opt(self.adj_land()),
                 Gather_for(time, loc, hide, nocapital) => {
+                    if time == 0 {
+                        return None;
+                    }
+
                     let (_, _, mov) = self.gather(time, loc, hide, nocapital);
 
-                    if time >= 1 {
-                        self.modes.push_front(
-                            Gather_for(loc, time - 1, hide, nocapital)
-                        )
-                    }
+                    self.modes.push_front(
+                        Gather_for(time - 1, loc, hide, nocapital)
+                    );
 
                     Move::opt(mov)
                 }
@@ -335,7 +445,7 @@ impl SmartBot {
                     } else {
                         self.moves.extend(moves[1..].iter().copied());
 
-                        return Some(Move::tup(moves[0]));
+                        Some(Move::tup(moves[0]))
                     }
                 }
                 Wait(time) => {
@@ -345,53 +455,18 @@ impl SmartBot {
 
                     return None;
                 }
-                _ => None
-            }
-        } else {
-            None
-        }
-    }
-}
+                Probe_from(loc, player) => {
+                    if let Some(mov) = self.probe(loc, player) {
+                        self.modes.push_front(Probe_from(mov.1, player));
 
-impl Player for SmartBot {
-    fn init(&mut self, player: usize) {
-        self.player = player;
-    }
+                        Some(Move::tup(mov))
+                    } else {
+                        self.modes.push_front(Probe_from(loc, player));
 
-    fn get_move(&mut self, diff: StateDiff) -> Option<Move> {
-        self.update(diff);
-        // println!("{}", self.state);
-
-        let now = Instant::now();
-        let capital = self.state.generals[self.player] as usize;
-
-        if self.moves.is_empty() {
-            if self.state.turn < 5 {
-                self.opener(capital);
-            } else {
-                // let time = 50 - self.state.turn % 50;
-
-                if let Some(mov) = self.adj_land() {
-                    self.moves.push_back(mov);
-                }
-                // if self.moves.is_empty() && time > 2 {
-                    // let moves = self.fast_land(time);
-
-                    // self.moves.extend(moves.into_iter());
-                // }
-                if self.moves.is_empty() {
-                    if let (_, _, Some(mov)) = self.gather(50 - self.state.turn % 50, capital, true, false) {
-                        self.moves.push_back(mov);
+                        None
                     }
                 }
             }
-        }
-
-        // println!("{}", now.elapsed().as_millis());
-        // println!("{:?}", self.moves);
-
-        if let Some(mov) = self.moves.pop_front() {
-            Some(Move::tup(mov))
         } else {
             None
         }

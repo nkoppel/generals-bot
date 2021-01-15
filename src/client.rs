@@ -9,7 +9,7 @@ use tungstenite::client::AutoStream;
 use tungstenite::Error::*;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone)]
 pub enum GameErr {
@@ -33,14 +33,9 @@ impl Client {
         }
     }
 
-    fn send_message(&mut self, data: Vec<&str>) {
-        if data.is_empty() {
-            return;
-        }
-
-        let mut buf = "42[\"".to_string();
-        buf += &data.join("\",\"");
-        buf += "\"]";
+    fn send_message(&mut self, value: Value) {
+        let mut buf = "42".to_string();
+        buf += &value.to_string();
 
         self.socket.write_message(Text(buf));
         self.socket.write_pending();
@@ -51,42 +46,42 @@ impl Client {
     }
 
     pub fn set_username(&mut self, name: &str) {
-        self.send_message(vec!["set_username", &self.id.clone(), name]);
+        self.send_message(json!(["set_username", &self.id, name]));
     }
 
     pub fn join_private(&mut self, game_id: &str) {
-        self.send_message(vec!["join_private", game_id, &self.id.clone()]);
-
-        self.set_force_start(game_id);
+        self.send_message(json!(["join_private", game_id, &self.id]));
     }
 
     pub fn join_1v1(&mut self) {
-        self.send_message(vec!["join_1v1", &self.id.clone()]);
+        self.send_message(json!(["join_1v1", &self.id]));
+    }
+
+    pub fn join_ffa(&mut self) {
+        self.send_message(json!(["play", &self.id]));
     }
 
     pub fn set_force_start(&mut self, game_id: &str) {
-        let msg = Text(format!("42[\"set_force_start\",\"{}\",true]", game_id));
+        let msg = json!(["set_force_start", game_id, true]);
         let second = time::Duration::from_millis(1000);
 
         self.ping();
-        self.socket.write_message(msg.clone());
+        self.send_message(msg.clone());
 
         loop {
             match self.socket.read_message() {
                 Ok(Pong(_)) => {
                     thread::sleep(second);
                     self.ping();
-                    self.socket.write_message(msg.clone());
+                    self.send_message(msg.clone());
                 },
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
                     if let Ok(Value::Array(val)) = serde_json::from_str(&s[2..]) {
                         if val[0] == Value::String("queue_update".to_string()) {
                             if let Some(map) = val[1].as_object() {
-                                if let Some(Value::Bool(b)) = map.get("isForcing") {
-                                    if *b {
-                                        break;
-                                    }
+                                if let Some(Value::Bool(true)) = map.get("isForcing") {
+                                    break;
                                 }
                             }
                         }
@@ -124,9 +119,7 @@ impl Client {
     pub fn send_move(&mut self, mov: Option<Move>) {
         let mov = mov.unwrap_or(Move::new(0, 0, false));
 
-        self.socket.write_message(Text(
-            format!("42[\"attack\",{},{},{}]", mov.start, mov.end, mov.is50)
-        ));
+        self.send_message(json!(["attack", mov.start, mov.end, mov.is50]));
     }
 
     pub fn get_diff(&mut self) -> Result<StateDiff, GameErr> {
