@@ -16,17 +16,18 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let mut client = Client::new("ws://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
-    client.join_private(&args[2]);
-    // client.set_force_start();
+    // client.join_private(&args[2]);
+    // client.set_force_start(&args[2]);
     // client.join_1v1();
+    client.run_1v1(&mut (Box::new(SmartBot::new()) as Box<dyn Player>));
 
     // client.run_player(Box::new(SmartBot::new()));
-    client.debug_listen();
+    // client.debug_listen();
 
     // let players =
         // vec![
             // Box::new(SmartBot::new()) as Box<dyn Player>,
-            // Box::new(NoneBot{})
+            // Box::new(RandomBot::new())
         // ];
 
     // let state = State::generate(18, 18, 60, 10, 2);

@@ -11,7 +11,9 @@ use tungstenite::Error::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-#[derive(Debug, Clone)]
+use chrono::prelude::*;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameErr {
     GameWon,
     GameLost,
@@ -22,6 +24,7 @@ pub use GameErr::*;
 
 pub struct Client {
     socket: WebSocket<AutoStream>,
+    url: String,
     id: String
 }
 
@@ -29,6 +32,7 @@ impl Client {
     pub fn new(url: &str, i: &str) -> Self {
         Client {
             socket: connect(url).expect("Unable to connect").0,
+            url: url.to_string(),
             id: i.to_string()
         }
     }
@@ -147,7 +151,9 @@ impl Client {
 
     pub fn get_game_start(&mut self) -> Option<GameStart> {
         loop {
-            match self.socket.read_message() {
+            let msg = self.socket.read_message();
+            // println!("{:?}", msg);
+            match msg {
                 Err(_) | Ok(Close(_)) => return None,
                 Ok(Text(s)) => {
                     if let Ok(Value::Array(arr)) = serde_json::from_str(&s[2..]) {
@@ -166,7 +172,7 @@ impl Client {
         }
     }
 
-    pub fn run_player(&mut self, mut player: Box<dyn Player>) -> GameErr {
+    pub fn run_player(&mut self, player: &mut Box<dyn Player>) -> GameErr {
         let start;
 
         if let Some(s) = self.get_game_start() {
@@ -177,6 +183,7 @@ impl Client {
 
         let mut tmp = self.get_diff();
 
+        println!("{}", Local::now().format("[ %T %D ]"));
         println!("Entering new {} match.", start.game_type);
         println!("Players: {}.", start.usernames.join(" | "));
         println!("Replay will be available at http://bot.generals.io/replays/{}", start.replay_id);
@@ -192,6 +199,16 @@ impl Client {
         println!("Result: {:?}", tmp.clone().unwrap_err());
         println!();
         return tmp.unwrap_err();
+    }
+
+    pub fn run_1v1(&mut self, mut player: &mut Box<dyn Player>) {
+        loop {
+            self.join_1v1();
+
+            if self.run_player(&mut player) == GameConnectionLost {
+                self.socket = connect(&self.url).expect("Unable to connect").0;
+            }
+        }
     }
 }
 
@@ -216,15 +233,21 @@ fn diff_from_value(val: &Value) -> StateDiff {
 
     let scores = update.scores
         .iter()
-        .map(|m| (helper(m.get("tiles")), helper(m.get("total"))))
+        .map(|m| (helper(m.get("i")), helper(m.get("tiles")), helper(m.get("total"))))
         .collect::<Vec<_>>();
+
+    let mut scores2 = vec![(0, 0); scores.len()];
+
+    for (i, land, armies) in scores {
+        scores2[i] = (land, armies);
+    }
 
     return StateDiff {
         turn: update.turn,
         map_diff: update.map_diff,
         cities_diff: update.cities_diff,
         generals: update.generals,
-        scores
+        scores: scores2
     }
 }
 

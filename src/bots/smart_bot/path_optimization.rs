@@ -77,7 +77,7 @@ pub fn find_path<F1>(width: usize,
 
                 avg_reward =
                     avg_reward * (n_searched - 1.) / n_searched +
-                    reward as f64 / n_searched;
+                    (reward as f64).abs() / n_searched;
 
                 n_searched += 1.;
 

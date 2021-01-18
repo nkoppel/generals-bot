@@ -238,7 +238,7 @@ impl State {
                 self.terrain[mov.end] = player as isize;
                 self.armies[mov.end] = transferred - self.armies[mov.end];
             } else {
-                self.armies[mov.end] -= self.armies[mov.start] - 1;
+                self.armies[mov.end] -= transferred;
             }
         }
 
@@ -291,11 +291,12 @@ impl Simulator {
     }
 
     pub fn sim(&mut self, rounds: usize, wait: usize) -> Option<usize> {
-        println!("{}", self.state);
-
         let wait = Duration::from_millis(wait as u64);
 
         self.state.incr_armies();
+        self.state.turn -= 1;
+
+        println!("{}", self.state);
 
         for _ in 0..rounds {
             self.state.incr_armies();

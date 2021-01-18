@@ -11,6 +11,9 @@ use path_optimization::*;
 pub use strategy::*;
 
 const PROBE_LOOKAHEAD: usize = 10;
+const PROBE_DIST_WEIGHT: isize = 20;
+const PROBE_CONV_WEIGHT: isize = 16;
+
 const FL_ATTEMPTS: usize = 10;
 
 #[derive(Clone, Copy, Debug)]
@@ -62,13 +65,15 @@ impl SmartBot {
            !self.player_cities.is_empty()
         {
             for i in 0..self.state.scores.len() {
-                if self.state.turn % 50 == 2 {
-                    self.player_cities[i] =
-                        self.state.scores[i].1 - self.old_state.scores[i].1;
-                } else {
-                    self.player_cities[i] = self.player_cities[i].max(
-                        self.state.scores[i].1 - self.old_state.scores[i].1
-                    );
+                if self.old_state.scores[i].1 <= self.state.scores[i].1 {
+                    if self.state.turn % 50 == 2 {
+                        self.player_cities[i] =
+                            self.state.scores[i].1 - self.old_state.scores[i].1;
+                    } else {
+                        self.player_cities[i] = self.player_cities[i].max(
+                            self.state.scores[i].1 - self.old_state.scores[i].1
+                        );
+                    }
                 }
             }
         } else if self.player_cities.is_empty() {
@@ -213,7 +218,9 @@ impl SmartBot {
             .collect();
 
         for c in &self.state.cities {
-            map[*c as usize] = 1;
+            if self.state.terrain[*c as usize] != self.player as isize {
+                map[*c as usize] = 1;
+            }
         }
 
         let dist = min_distance(self.state.width, &map);
@@ -221,9 +228,7 @@ impl SmartBot {
         nearest(self.state.width, &dist, loc)
     } 
 
-    fn get_seen_dist(&self, player: usize) -> Vec<usize> {
-        // w = 1/16
-        
+    fn get_player_dist(&self, player: usize) -> Vec<usize> {
         let map = self.seen_terrain
             .iter()
             .map(|x| {
@@ -242,29 +247,56 @@ impl SmartBot {
         min_distance(self.state.width, &map)
     }
 
+    fn get_seen_dist(&self) -> Vec<usize> {
+        let map = self.seen_terrain
+            .iter()
+            .map(|x| {
+                if *x == -2 || *x == -4 {
+                    -1
+                } else if *x == -3 {
+                    0
+                } else {
+                    1
+                }
+            })
+            .collect::<Vec<isize>>();
+
+        min_distance(self.state.width, &map)
+    }
+
     fn probe(&self, loc: usize, player: usize) -> Option<(usize, usize)> {
         if self.state.terrain[loc] != self.player as isize {
             return None;
         }
 
-        let rew = self.get_seen_dist(player)
-            .iter()
+        let rew = self.get_player_dist(player)
+            .into_iter()
+            .zip(self.get_seen_dist().into_iter())
             .zip(self.state.armies.iter())
             .zip(self.state.terrain.iter())
-            .map(|((mut dist, armies), t)| {
-                if *dist > PROBE_LOOKAHEAD {
+            .map(|(((player_dist, seen_dist), armies), t)| {
+                if player_dist > PROBE_LOOKAHEAD {
                     if *t == self.player as isize {
-                        armies - 1000000
+                        -10
                     } else {
-                        -armies - 1000000
+                        -armies
                     }
                 } else {
-                    *dist as isize - armies
+                    PROBE_DIST_WEIGHT *
+                    (2 * seen_dist as isize - player_dist as isize) - armies
                 }
             })
             .collect::<Vec<_>>();
 
-        let reward = move |i| rew[i];
+        let reward = |i| {
+            let mut out = rew[i] * PROBE_CONV_WEIGHT;
+
+            for n in get_vis_neighbors(self.state.width, self.state.height, i) {
+                out += rew[n];
+            }
+
+            out
+        };
 
         let obstacles = self.state.terrain
             .iter()
@@ -273,12 +305,23 @@ impl SmartBot {
 
         let (paths, parents) =
             find_path(self.state.width, loc, false, PROBE_LOOKAHEAD, reward, &obstacles);
-        let tree = PathTree::from_path(paths.last().unwrap(), &parents);
+
+        let mut best = paths.len() - 1;
+
+        for i in 0..paths.len() - 1 {
+            if paths[i].0 > paths[best].0 {
+                best = i;
+            }
+        }
+
+        if paths[best].1.is_empty() {
+            return None;
+        }
+
+        let tree = PathTree::from_path(&paths[best], &parents);
 
         if let Some(mov) = tree.serialize_outwards().first() {
-            if self.state.terrain[mov.1] == player as isize &&
-               self.state.armies[mov.0] - 1 < self.state.armies[mov.1] 
-            {
+            if self.state.armies[mov.0] + 1 > self.state.armies[mov.1] {
                 return Some(*mov);
             }
         }
@@ -306,11 +349,40 @@ impl SmartBot {
         }
     }
 
+    fn losing_on_cities(&self) -> bool {
+        let my_cities = self.player_cities[self.player];
+        print!("{} {:?}", my_cities, self.player_cities);
+
+        if self.state.turn % 50 > 25 {
+            for c in &self.player_cities {
+                if *c > my_cities {
+                    println!(" {}", true);
+                    return true;
+                }
+            }
+        }
+        println!(" {}", false);
+        false
+    }
+
+    fn get_city(&mut self) {
+        let capital = self.state.generals[self.player] as usize;
+
+        if let Some(loc) = self.find_nearest_city(capital) {
+            println!("CITY {}", loc);
+            self.modes.push_back(Gather_until(1, loc, false, false));
+        } else {
+            println!("LAND");
+            self.fast_land(20);
+        }
+    }
+
     fn opener(&mut self, start: usize) {
-        for (wait, cost) in vec![(24, 14), (3, 9)] {
+        for (wait, cost) in vec![(23, 14), (3, 9)] {
             self.modes.push_back(Wait(wait));
             self.modes.push_back(Expand_strand(start, cost));
         }
+        self.modes.push_back(Wait(1));
     }
 
     fn adj_land(&self) -> Option<(usize, usize)> {
@@ -396,11 +468,9 @@ impl SmartBot {
 
             for i in time / 2 .. time {
                 if paths[i].0 >= armies as isize && !paths[i].1.is_empty() {
-                    let tree = PathTree::from_path(&paths[time], &parents);
+                    let tree = PathTree::from_path(&paths[i], &parents);
 
                     return tree.serialize_inwards().into_iter().next();
-                } else if paths[i].0 >= armies as isize {
-                    return None;
                 }
             }
 
@@ -413,6 +483,7 @@ impl SmartBot {
         if let Some(mov) = self.moves.pop_front() {
             Some(Move::tup(mov))
         } else if let Some(mode) = self.modes.pop_front() {
+            println!("{:?}", mode);
             match mode {
                 Adj_land => Move::opt(self.adj_land()),
                 Gather_for(time, loc, hide, nocapital) => {
@@ -431,9 +502,11 @@ impl SmartBot {
                 Gather_until(armies, loc, hide, nocapital) => {
                     let mov = self.gather_until(armies, loc, hide, nocapital);
 
-                    self.modes.push_front(
-                        Gather_until(armies, loc, hide, nocapital)
-                    );
+                    if self.state.armies[loc] < armies as isize {
+                        self.modes.push_front(
+                            Gather_until(armies, loc, hide, nocapital)
+                        );
+                    }
 
                     Move::opt(mov)
                 }
@@ -453,7 +526,7 @@ impl SmartBot {
                         self.modes.push_front(Wait(time - 1));
                     }
 
-                    return None;
+                    Some(Move::new(0, 0, false))
                 }
                 Probe_from(loc, player) => {
                     if let Some(mov) = self.probe(loc, player) {
@@ -461,8 +534,6 @@ impl SmartBot {
 
                         Some(Move::tup(mov))
                     } else {
-                        self.modes.push_front(Probe_from(loc, player));
-
                         None
                     }
                 }
