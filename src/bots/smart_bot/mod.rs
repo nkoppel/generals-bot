@@ -351,17 +351,14 @@ impl SmartBot {
 
     fn losing_on_cities(&self) -> bool {
         let my_cities = self.player_cities[self.player];
-        print!("{} {:?}", my_cities, self.player_cities);
 
         if self.state.turn % 50 > 25 {
             for c in &self.player_cities {
                 if *c > my_cities {
-                    println!(" {}", true);
                     return true;
                 }
             }
         }
-        println!(" {}", false);
         false
     }
 
@@ -369,10 +366,8 @@ impl SmartBot {
         let capital = self.state.generals[self.player] as usize;
 
         if let Some(loc) = self.find_nearest_city(capital) {
-            println!("CITY {}", loc);
             self.modes.push_back(Gather_until(1, loc, false, false));
         } else {
-            println!("LAND");
             self.fast_land(20);
         }
     }
@@ -483,7 +478,6 @@ impl SmartBot {
         if let Some(mov) = self.moves.pop_front() {
             Some(Move::tup(mov))
         } else if let Some(mode) = self.modes.pop_front() {
-            println!("{:?}", mode);
             match mode {
                 Adj_land => Move::opt(self.adj_land()),
                 Gather_for(time, loc, hide, nocapital) => {
