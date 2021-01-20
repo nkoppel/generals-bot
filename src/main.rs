@@ -27,7 +27,7 @@ fn main() {
     // let players =
         // vec![
             // Box::new(SmartBot::new()) as Box<dyn Player>,
-            // Box::new(RandomBot::new())
+            // Box::new(SmartBot::new())
         // ];
 
     // let state = State::generate(18, 18, 60, 10, 2);

@@ -3,7 +3,7 @@ use super::*;
 pub type Path = (isize, Vec<usize>);
 pub type Paths = Vec<Path>;
 
-const COST_WEIGHT: f64 = 2.;
+const COST_WEIGHT: f64 = 0.2;
 
 fn better_path(p1: &mut Path, p2: Path) {
     if p2.0 > p1.0 {
@@ -83,7 +83,10 @@ pub fn find_path<F1>(width: usize,
 
                 let h =
                     path_reward[n] -
-                    (COST_WEIGHT * avg_reward * path_cost[n] as f64) as isize;
+                    (COST_WEIGHT *
+                     avg_reward *
+                     (max_cost - path_cost[n]) as f64 *
+                     path_cost[n] as f64) as isize;
 
                 queue.push((h, n));
             }

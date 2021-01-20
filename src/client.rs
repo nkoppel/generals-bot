@@ -197,6 +197,7 @@ impl Client {
         }
 
         println!("Result: {:?}", tmp.clone().unwrap_err());
+        println!("{}", Local::now().format("[ %T %D ]"));
         println!();
         return tmp.unwrap_err();
     }

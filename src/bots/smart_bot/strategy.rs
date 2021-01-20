@@ -47,8 +47,10 @@ impl SmartBot {
                     self.modes.push_front(
                         Gather_until(5, general, false, false)
                     );
-                    return self.run_modes();
 
+                    if let Some(mov) = self.run_modes() {
+                        return Some(mov);
+                    }
                 }
             } else if self.modes.is_empty() {
                 if let Some(loc) = self.find_probe_loc(player) {

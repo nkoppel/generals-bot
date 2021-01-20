@@ -454,14 +454,14 @@ impl SmartBot {
     fn gather_until(&self, armies: usize, loc: usize, hide: bool, nocapital: bool)
         -> Option<(usize, usize)>
     {
-        let max_time = (self.state.width + self.state.height) * 2;
+        let max_time = ((self.state.width + self.state.height) * 2).next_power_of_two();
 
         let mut time = 1;
 
-        while time < max_time {
+        while time <= max_time {
             let (paths, parents, _) = self.gather(time, loc, hide, nocapital);
 
-            for i in time / 2 .. time {
+            for i in 0..time {
                 if paths[i].0 >= armies as isize && !paths[i].1.is_empty() {
                     let tree = PathTree::from_path(&paths[i], &parents);
 
@@ -496,7 +496,7 @@ impl SmartBot {
                 Gather_until(armies, loc, hide, nocapital) => {
                     let mov = self.gather_until(armies, loc, hide, nocapital);
 
-                    if self.state.armies[loc] < armies as isize {
+                    if let Some(_) = mov {
                         self.modes.push_front(
                             Gather_until(armies, loc, hide, nocapital)
                         );
