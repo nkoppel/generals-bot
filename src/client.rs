@@ -126,21 +126,16 @@ impl Client {
         self.send_message(json!(["attack", mov.start, mov.end, mov.is50]));
     }
 
-    pub fn get_diff(&mut self) -> Result<StateDiff, GameErr> {
+    pub fn get_message<F, T>(&mut self, func: F, default: T) -> T
+        where F: Fn(Value) -> Option<T>
+    {
         loop {
             match self.socket.read_message() {
-                Err(_) | Ok(Close(_)) => return Err(GameConnectionLost),
-                Ok(Text(s)) => {
-                    if let Ok(Value::Array(arr)) = serde_json::from_str(&s[2..]) {
-                        if let Value::String(c) = &arr[0] {
-                            if c == "game_won" {
-                                return Err(GameWon);
-                            } else if c == "game_lost" {
-                                return Err(GameLost);
-                            } else if c == "game_update" {
-                                // println!("{}", s);
-                                return Ok(diff_from_value(&arr[1]));
-                            }
+                Err(_) | Ok(Close(_)) => return default,
+                Ok(Text(msg)) => {
+                    if let Ok(val) = serde_json::from_str(&msg[2..]) {
+                        if let Some(out) = func(val) {
+                            return out;
                         }
                     }
                 }
@@ -149,27 +144,42 @@ impl Client {
         }
     }
 
-    pub fn get_game_start(&mut self) -> Option<GameStart> {
-        loop {
-            let msg = self.socket.read_message();
-            // println!("{:?}", msg);
-            match msg {
-                Err(_) | Ok(Close(_)) => return None,
-                Ok(Text(s)) => {
-                    if let Ok(Value::Array(arr)) = serde_json::from_str(&s[2..]) {
-                        if let Value::String(s) = &arr[0] {
-                            if s == "game_start" {
-                                return
-                                    serde_json::from_str(
-                                        &serde_json::to_string(&arr[1]).unwrap()
-                                    ).unwrap();
-                            }
-                        }
+    pub fn get_diff(&mut self) -> Result<StateDiff, GameErr> {
+        let f = |val| {
+            if let Value::Array(arr) = val {
+                if let Value::String(c) = &arr[0] {
+                    if c == "game_won" {
+                        return Some(Err(GameWon));
+                    } else if c == "game_lost" {
+                        return Some(Err(GameLost));
+                    } else if c == "game_update" {
+                        // println!("{}", s);
+                        return Some(Ok(diff_from_value(&arr[1])));
                     }
                 }
-                _ => {}
             }
-        }
+            None
+        };
+
+        self.get_message(f, Err(GameConnectionLost))
+    }
+
+    pub fn get_game_start(&mut self) -> Option<GameStart> {
+        let f = |val| {
+            if let Value::Array(arr) = val {
+                if let Value::String(s) = &arr[0] {
+                    if s == "game_start" {
+                        return
+                            serde_json::from_str(
+                                &serde_json::to_string(&arr[1]).unwrap()
+                            ).unwrap();
+                    }
+                }
+            }
+            None
+        };
+
+        self.get_message(f, None)
     }
 
     pub fn run_player(&mut self, player: &mut Box<dyn Player>) -> GameErr {
