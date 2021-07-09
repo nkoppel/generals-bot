@@ -66,7 +66,7 @@ pub fn select_rand_eq<T>(vec: &Vec<T>, item: &T) -> Option<usize>
 
     let mut rng = thread_rng();
 
-    let n = rng.gen_range(0, num_eq) + 1;
+    let n = rng.gen_range(0..num_eq) + 1;
     let mut j = 0;
 
     for i in 0..vec.len() {
@@ -255,7 +255,7 @@ impl State {
             return None;
         }
 
-        let end = neighbors[rng.gen_range(0, neighbors.len())];
+        let end = neighbors[rng.gen_range(0..neighbors.len())];
 
         Some(Move::new(start, end, false))
     }
@@ -290,13 +290,17 @@ impl Simulator {
         }
     }
 
+    pub fn into_state(self) -> State {
+        self.state
+    }
+
     pub fn sim(&mut self, rounds: usize, wait: usize) -> Option<usize> {
         let wait = Duration::from_millis(wait as u64);
 
         self.state.incr_armies();
         self.state.turn -= 1;
 
-        println!("{}", self.state);
+        // println!("{}", self.state);
 
         for _ in 0..rounds {
             self.state.incr_armies();
@@ -339,7 +343,7 @@ impl Simulator {
 
             self.state = state;
 
-            println!("{}", self.state);
+            // println!("{}", self.state);
 
             thread::sleep(wait.saturating_sub(time_spent.elapsed()));
         }

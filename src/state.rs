@@ -122,7 +122,7 @@ impl State {
 
     pub fn copy_fog(&self) -> Self {
         let mut out = self.clone();
-        let size = self.width * self.height;
+        let size = self.size();
 
         out.armies = vec![0; size];
         out.generals = vec![-1; self.generals.len()];
@@ -140,6 +140,10 @@ impl State {
         }
 
         out
+    }
+
+    pub fn size(&self) -> usize {
+        self.width * self.height
     }
 
     pub fn generate(width: usize, height: usize, nmountians: usize, ncities: usize, nplayers: usize) -> Self {
@@ -174,7 +178,7 @@ impl State {
 
         for _ in 0..ncities {
             out.cities.push(tiles[i] as isize);
-            out.armies[tiles[i]] = rng.gen_range(40, 51);
+            out.armies[tiles[i]] = rng.gen_range(40..51);
             i += 1;
         }
 
@@ -199,7 +203,7 @@ impl State {
         self.width  = data[0] as usize;
         self.height = data[1] as usize;
 
-        let size = self.width * self.height;
+        let size = self.size();
 
         self.armies = data[2..2 + size].to_vec();
         self.terrain = data[2 + size..].to_vec();
