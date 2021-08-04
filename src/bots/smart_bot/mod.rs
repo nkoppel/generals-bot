@@ -5,28 +5,13 @@ use std::mem;
 use std::time::{Duration, Instant};
 
 mod path_optimization;
+mod actions;
 mod strategy;
 
 use path_optimization::*;
 pub use strategy::*;
 
-const PROBE_LOOKAHEAD: usize = 10;
-const PROBE_DIST_WEIGHT: isize = 20;
-const PROBE_CONV_WEIGHT: isize = 16;
-
 const FL_ATTEMPTS: usize = 10;
-
-#[derive(Clone, Copy, Debug)]
-enum BotMode {
-    Adj_land,
-    Gather_for(usize, usize, bool, bool), // time, loc, hide, nocapital
-    Gather_until(usize, usize, bool, bool), // armies, loc, hide, nocapital
-    Probe_from(usize, usize), // loc, player
-    Expand_strand(usize, usize), // loc, time
-    Wait(usize) // time
-}
-
-use BotMode::*;
 
 pub struct SmartBot {
     old_state: State,
@@ -34,10 +19,10 @@ pub struct SmartBot {
     seen_cities: HashSet<usize>,
     seen_generals: Vec<isize>,
     seen_terrain: Vec<isize>,
+    player_cities_tmp: Vec<usize>,
     player_cities: Vec<usize>,
     player: usize,
-    moves: VecDeque<(usize, usize)>,
-    modes: VecDeque<BotMode>
+    previous_action: Action
 }
 
 impl SmartBot {
@@ -48,10 +33,10 @@ impl SmartBot {
             seen_cities: HashSet::new(),
             seen_generals: Vec::new(),
             seen_terrain: Vec::new(),
+            player_cities_tmp: Vec::new(),
             player_cities: Vec::new(),
             player: 0,
-            moves: VecDeque::new(),
-            modes: VecDeque::new(),
+            previous_action: Action::empty()
         }
     }
 
@@ -60,24 +45,26 @@ impl SmartBot {
 
         self.state.patch(diff);
 
-        if self.state.turn % 2 == 0 &&
-           self.state.turn % 50 != 0 &&
-           !self.player_cities.is_empty()
-        {
-            for i in 0..self.state.scores.len() {
-                if self.old_state.scores[i].1 <= self.state.scores[i].1 {
-                    if self.state.turn % 50 == 2 {
-                        self.player_cities[i] =
-                            self.state.scores[i].1 - self.old_state.scores[i].1;
-                    } else {
-                        self.player_cities[i] = self.player_cities[i].max(
-                            self.state.scores[i].1 - self.old_state.scores[i].1
-                        );
-                    }
-                }
-            }
-        } else if self.player_cities.is_empty() {
+        if self.player_cities.is_empty() {
             self.player_cities = vec![1; self.state.generals.len()];
+            self.player_cities_tmp = vec![1; self.state.generals.len()];
+        }
+
+        if self.state.turn % 50 == 0 {
+            self.player_cities = mem::replace(
+                &mut self.player_cities_tmp,
+                vec![1; self.state.generals.len()]
+            );
+        } else if self.state.turn % 2 == 0 {
+            for i in 0..self.state.scores.len() {
+                self.player_cities_tmp[i] = self.player_cities_tmp[i].max(
+                    self.state.scores[i].0.saturating_sub(self.old_state.scores[i].0)
+                );
+
+                self.player_cities[i] = self.player_cities[i].max(
+                    self.player_cities_tmp[i]
+                );
+            }
         }
 
         for c in &self.state.cities {
@@ -106,29 +93,35 @@ impl SmartBot {
         }
     }
 
-    fn expand_strand(&self, start: usize, cost: usize)
+    fn expand(&self, start: usize, len: usize, cling: bool)
         -> Vec<(usize, usize)>
     {
-        let reward_func = |i| {
+        let mut reward = vec![0.; self.state.terrain.len()];
+
+        for i in 0..self.state.terrain.len() {
             if self.state.terrain[i] == self.player as isize {
-                return 0;
+                continue;
             }
 
-            let mut out: isize = 0;
+            let mut out: f64 = 0.;
 
             for n in get_neighbors(self.state.width, self.state.height, i) {
-                match self.state.terrain[n] {
-                    -1 | -3 => out += 1,
-                    n if n >= 0 && n != self.player as isize => out += 1,
-                    _ => (),
+                if cling {
+                    match self.state.terrain[n] {
+                        -2 | -4 => out += 1.,
+                        n if n == self.player as isize => out += 2.,
+                        _ => (),
+                    }
+                } else {
+                    match self.state.terrain[n] {
+                        -1 | -3 => out += 1.,
+                        n if n >= 0 && n != self.player as isize => out += 1.,
+                        _ => (),
+                    }
                 }
             }
 
-            if out <= 2 {
-                2
-            } else {
-                out
-            }
+            reward[i] = out;
         };
 
         let obstacles = self.state.terrain
@@ -137,78 +130,50 @@ impl SmartBot {
             .map(|(i, t)| *t == -2 || *t == -4 || self.state.cities.contains(&(i as isize)))
             .collect::<Vec<_>>();
 
-        let (paths, parents) =
-            find_path(self.state.width, start, false, cost, reward_func, &obstacles);
+        let mut pather = Pather::new(self.state.width, &reward, &obstacles);
 
-        mem::drop(reward_func);
+        pather.create_graph(start, len, 1, false);
+        let paths = pather.get_best_paths(start, len, false);
 
-        if paths[cost - 1].1.is_empty() {
-            return Vec::new();
-        }
+        let path = paths
+            .into_iter()
+            .rev()
+            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap())
+            .unwrap();
 
-        let tree = PathTree::from_path(&paths[cost - 1], &parents);
-
-        tree.serialize_outwards().into_iter().collect()
+        pather.get_moves(&path, false)
     }
 
-    fn find_strand_loc(&self, dist: usize) -> Option<usize> {
-        let mut map: Vec<isize> = self.state.terrain
-            .iter()
-            .map(|x|
-                if *x == self.player as isize {
-                    1
-                } else if *x == -2 || *x == -4 {
-                    -1
-                } else {
-                    0
-                }
-            )
-            .collect();
-
-
-        for c in &self.state.cities {
-            if map[*c as usize] < 0 {
-                map[*c as usize] = -1;
-            }
-        }
-
-        let dist_field = min_distance(self.state.width, &map);
-        let t = select_rand_eq(&dist_field, &dist)?;
-
-        nearest(self.state.width, &dist_field, t)
-    }
-
-    fn find_probe_loc(&self, player: usize) -> Option<usize> {
-        let mut map: Vec<isize> = self.state.terrain
-            .iter()
-            .enumerate()
-            .map(|(i, x)|
-                if *x == self.player as isize {
-                    for n in get_vis_neighbors(self.state.width, self.state.height, i) {
-                        if self.state.terrain[n] == player as isize {
-                            return 0;
-                        }
+    fn find_strand_loc(&self, dist: usize, attempts: usize) -> Option<usize> {
+        for _ in 0..attempts {
+            let mut map: Vec<isize> = self.state.terrain
+                .iter()
+                .map(|x|
+                    if *x == self.player as isize {
+                        1
+                    } else if *x == -2 || *x == -4 {
+                        -1
+                    } else {
+                        0
                     }
+                )
+                .collect();
 
-                    1
-                } else if *x == -2 || *x == -4 {
-                    -1
-                } else {
-                    0
+
+            for c in &self.state.cities {
+                if map[*c as usize] < 0 {
+                    map[*c as usize] = -1;
                 }
-            )
-            .collect();
+            }
 
-        for c in &self.state.cities {
-            if map[*c as usize] < 0 {
-                map[*c as usize] = -1;
+            let dist_field = min_distance(self.state.width, &map);
+            let t = select_rand_eq(&dist_field, &dist)?;
+
+            if let Some(out) = nearest_zero(self.state.width, &dist_field, t) {
+                return Some(out);
             }
         }
-
-        let dist_field = min_distance(self.state.width, &map);
-        let t = select_rand_eq(&self.seen_terrain, &(player as isize))?;
-
-        nearest(self.state.width, &dist_field, t)
+        None
     }
 
     fn find_nearest_city(&self, loc: usize) -> Option<usize> {
@@ -225,7 +190,7 @@ impl SmartBot {
 
         let dist = min_distance(self.state.width, &map);
 
-        nearest(self.state.width, &dist, loc)
+        nearest_zero(self.state.width, &dist, loc)
     } 
 
     fn get_player_dist(&self, player: usize) -> Vec<usize> {
@@ -264,276 +229,194 @@ impl SmartBot {
         min_distance(self.state.width, &map)
     }
 
-    fn probe(&self, loc: usize, player: usize) -> Option<(usize, usize)> {
-        if self.state.terrain[loc] != self.player as isize {
-            return None;
-        }
-
-        let rew = self.get_player_dist(player)
-            .into_iter()
-            .zip(self.get_seen_dist().into_iter())
-            .zip(self.state.armies.iter())
-            .zip(self.state.terrain.iter())
-            .map(|(((player_dist, seen_dist), armies), t)| {
-                if player_dist > PROBE_LOOKAHEAD {
-                    if *t == self.player as isize {
-                        -10
-                    } else {
-                        -armies
-                    }
-                } else {
-                    PROBE_DIST_WEIGHT *
-                    (2 * seen_dist as isize - player_dist as isize) - armies
+    fn get_probe_loc(&self, player: usize) -> Option<usize> {
+        let mut candidates = 0;
+        let mut probe_map = self.state.terrain.iter()
+            .copied()
+            .map(|t| {
+                match t {
+                    -2 | -4 => -1,
+                    _ => 0
                 }
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<isize>>();
 
-        let reward = |i| {
-            let mut out = rew[i] * PROBE_CONV_WEIGHT;
-
-            for n in get_vis_neighbors(self.state.width, self.state.height, i) {
-                out += rew[n];
+        for i in 0..self.state.terrain.len() {
+            if self.state.terrain[i] != -3 {
+                continue;
             }
-
-            out
-        };
-
-        let obstacles = self.state.terrain
-            .iter()
-            .map(|i| *i == -2 || *i == -4)
-            .collect::<Vec<_>>();
-
-        let (paths, parents) =
-            find_path(self.state.width, loc, false, PROBE_LOOKAHEAD, reward, &obstacles);
-
-        let mut best = paths.len() - 1;
-
-        for i in 0..paths.len() - 1 {
-            if paths[i].0 > paths[best].0 {
-                best = i;
-            }
-        }
-
-        if paths[best].1.is_empty() {
-            return None;
-        }
-
-        let tree = PathTree::from_path(&paths[best], &parents);
-
-        if let Some(mov) = tree.serialize_outwards().first() {
-            if self.state.armies[mov.0] + 1 > self.state.armies[mov.1] {
-                return Some(*mov);
-            }
-        }
-
-        None
-    }
-
-    fn fast_land(&mut self, time: usize) {
-        for _ in 0..FL_ATTEMPTS {
-            if let Some(loc) = self.find_strand_loc(5) {
-                let (paths, _, _) = self.gather(time - 1, loc, false, self.state.turn >= 100);
-
-                for (i, path) in paths.iter().enumerate() {
-                    if path.0 >= 0 &&
-                       path.0 as usize >= time - i - 1 &&
-                       !path.1.is_empty()
-                    {
-                        self.modes.push_back(Gather_for(i - 1, loc, false, self.state.turn >= 100));
-                        self.modes.push_back(Expand_strand(loc, time - i - 1));
-
-                        return;
-                    }
+            for n in get_neighbors(self.state.width, self.state.height, i) {
+                if self.state.terrain[n] == player as isize {
+                    probe_map[i] = 1;
+                    candidates += 1;
                 }
             }
         }
-    }
 
-    fn losing_on_cities(&self) -> bool {
-        let my_cities = self.player_cities[self.player];
-
-        if self.state.turn % 50 > 25 {
-            for c in &self.player_cities {
-                if *c > my_cities {
-                    return true;
-                }
-            }
+        match candidates {
+            0 => return None,
+            1 => return probe_map.iter().position(|x| *x == 1),
+            _ => ()
         }
-        false
-    }
 
-    fn get_city(&mut self) {
-        let capital = self.state.generals[self.player] as usize;
+        let probe_dist = min_distance(self.state.width, &probe_map);
+        let mut army_tiles = Vec::new();
+        let mut best_tile = usize::MAX;
+        let mut best_score = 0;
 
-        if let Some(loc) = self.find_nearest_city(capital) {
-            self.modes.push_back(Gather_until(1, loc, false, false));
-        } else {
-            self.fast_land(20);
-        }
-    }
-
-    fn opener(&mut self, start: usize) {
-        for (wait, cost) in vec![(23, 14), (3, 9)] {
-            self.modes.push_back(Wait(wait));
-            self.modes.push_back(Expand_strand(start, cost));
-        }
-        self.modes.push_back(Wait(1));
-    }
-
-    fn adj_land(&self) -> Option<(usize, usize)> {
-        for i in 0..self.state.armies.len() {
+        for i in 0..self.state.terrain.len() {
             if self.state.terrain[i] == self.player as isize {
-                for n in get_neighbors(self.state.width, self.state.height, i) {
-                    if self.state.terrain[n] != self.player as isize &&
-                       self.state.terrain[n] != TILE_MOUNTAIN &&
-                       i != self.state.generals[self.player] as usize &&
-                       self.state.armies[i] > self.state.armies[n] + 1
-                    {
-                        return Some((i, n))
-                    }
+                if self.state.armies[i] >= 50 {
+                    army_tiles.push(i);
+                } else if self.state.armies[i] > best_score {
+                    best_score = self.state.armies[i];
+                    best_tile = i;
                 }
             }
         }
-        None
+
+        army_tiles.push(best_tile);
+
+        let (score, out) = army_tiles.iter()
+            .copied()
+            .map(|i| {
+                let path = nearest_zero_path(self.state.width, &probe_dist, i);
+                let mut score = 0;
+
+                if path.len() == 0 {
+                    return (f64::NEG_INFINITY, i);
+                }
+
+                for t in &path {
+                    if self.state.terrain[*t] == self.player as isize {
+                        score += self.state.armies[*t] - 1;
+                    } else {
+                        score -= self.state.armies[*t] + 1;
+                    }
+                }
+
+                (score as f64 / path.len() as f64, i)
+            })
+            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap())?;
+
+        if score == f64::NEG_INFINITY {
+            return None;
+        } else {
+            return Some(out);
+        }
     }
 
-    fn gather(&self, mut time: usize, loc: usize, hide: bool, nocapital: bool)
-        -> (Paths, Vec<usize>, Option<(usize, usize)>)
-    {
-        let reward_func = |i| {
-            let mut out = 0;
+    fn gather_expand(&self, loc: usize, gather_time: usize, cling: bool) -> Vec<(usize, usize)> {
+        let (mut moves, armies) = self.gather(gather_time, loc, false, self.state.turn >= 100);
+
+        moves.append(&mut self.expand(loc, armies as usize, cling));
+        // println!("gather_expand: {:?} {}", moves, armies);
+        return moves;
+    }
+
+    fn get_gather_reward(&self, hide: bool, nocapital: bool) -> Vec<f64> {
+        let mut reward = vec![0.; self.state.armies.len()];
+
+        for i in 0..self.state.armies.len() {
+            let mut r = 0;
 
             if hide {
                 for n in get_vis_neighbors(self.state.width, self.state.height, i) {
                     if self.state.terrain[n] >= 0 &&
                        self.state.terrain[n] != self.player as isize
                     {
-                        out = -100;
+                        r = -100;
                         break;
                     }
                 }
             }
 
             if nocapital && i as isize == self.state.generals[self.player] {
-                out -= 100000;
+                r -= 100000;
             }
 
-            if self.state.terrain[i] == self.player as isize {
-                out + self.state.armies[i] - 1
+            if self.state.terrain[i] == self.player as isize ||
+                i as isize == self.state.generals[self.player]
+            {
+                r += self.state.armies[i] - 1;
             } else {
-                out - self.state.armies[i]
+                r -= self.state.armies[i] + 1;
             } 
-        };
 
+            reward[i] = r as f64;
+        }
+
+        reward
+    }
+
+    fn gather(&self, mut time: usize, loc: usize, hide: bool, nocapital: bool)
+        -> (Vec<(usize, usize)>, isize)
+    {
+        let reward = self.get_gather_reward(hide, nocapital);
         let obstacles = self.state.terrain
             .iter()
             .map(|i| *i == -2 || *i == -4)
             .collect::<Vec<_>>();
 
-        let (paths, parents) =
-            find_path(self.state.width, loc, true, time, reward_func, &obstacles);
+        let mut pather = Pather::new(self.state.width, &reward, &obstacles);
 
-        time -= 1;
+        pather.create_graph(loc, time, 1, true);
+        let paths = pather.get_best_paths(loc, time, true);
+        let mut path = paths
+            .into_iter()
+            .rev()
+            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap())
+            .unwrap();
 
-        while time > 0 && (paths[time].0 == 0 || paths[time].0 == paths[time - 1].0) {
-            time -= 1;
-        }
-
-        let mut out_move = None;
-
-        if !paths[time].1.is_empty() {
-            let mut tree = PathTree::from_path(&paths[time], &parents);
-
-            tree.apply_priority(&reward_func);
-
-            out_move = tree.serialize_inwards().into_iter().next();
-        }
-        (paths, parents, out_move)
+        (pather.get_moves(&path, true), path.0 as isize)
     }
 
     fn gather_until(&self, armies: usize, loc: usize, hide: bool, nocapital: bool)
-        -> Option<(usize, usize)>
+        -> Vec<(usize, usize)>
     {
-        let max_time = ((self.state.width + self.state.height) * 2).next_power_of_two();
+        let reward = self.get_gather_reward(hide, nocapital);
+        let obstacles = self.state.terrain
+            .iter()
+            .map(|i| *i == -2 || *i == -4)
+            .collect::<Vec<_>>();
 
-        let mut time = 1;
+        let max_time = (self.state.width + self.state.height) * 2;
+        let mut pather = Pather::new(self.state.width, &reward, &obstacles);
+        let mut time = 20;
 
         while time <= max_time {
-            let (paths, parents, _) = self.gather(time, loc, hide, nocapital);
+            pather.create_graph(loc, time, 1, true);
+            let paths = pather.get_best_paths(loc, time, true);
 
             for i in 0..time {
-                if paths[i].0 >= armies as isize && !paths[i].1.is_empty() {
-                    let tree = PathTree::from_path(&paths[i], &parents);
-
-                    return tree.serialize_inwards().into_iter().next();
+                if paths[i].0 >= armies as f64 && !paths[i].1.is_empty() {
+                    return pather.get_moves(&paths[i], true);
                 }
             }
 
             time *= 2;
+            pather.reset();
         }
-        None
+        Vec::new()
     }
+}
 
-    fn run_modes(&mut self) -> Option<Move> {
-        if let Some(mov) = self.moves.pop_front() {
-            Some(Move::tup(mov))
-        } else if let Some(mode) = self.modes.pop_front() {
-            match mode {
-                Adj_land => Move::opt(self.adj_land()),
-                Gather_for(time, loc, hide, nocapital) => {
-                    if time == 0 {
-                        return None;
-                    }
+mod tests {
+    extern crate test;
 
-                    let (_, _, mov) = self.gather(time, loc, hide, nocapital);
+    use super::*;
+    use test::Bencher;
 
-                    self.modes.push_front(
-                        Gather_for(time - 1, loc, hide, nocapital)
-                    );
+    #[test]
+    fn t_gather() {
+        let state = State { width: 18, height: 18, turn: 19, terrain: vec![-1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -2, -1, -1, -1, -2, -2, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -2, -2, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -1, -2, -2, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -2, -2, -2, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -2, 1, -2, -1, -2, -1, -1, -1, -1, -1, -1, -2, -1, -2, -1, -1, -1, -1, -1, 1, -1, -2, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 1, -2, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -2, -1, -1, 0, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -2, -1, -1, -1, 0, -1, -2, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -2, -1, -2, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -2, -1, -1, -1, -1, -1, -2, -1, -1, -2, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -2, -1, -1, -2, -1, -2, -2, -1, -1, -1, -1, -1, -1, -2, -1, -2, -1, -2, -1, -2], armies: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 41, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 41, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 47, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 41, 0, 0, 42, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 45, 44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], cities: vec![259, 221, 101, 12, 222, 205, 156, 118, 202, 206], generals: vec![180, 141], scores: vec![(4, 11), (4, 11)] };
 
-                    Move::opt(mov)
-                }
-                Gather_until(armies, loc, hide, nocapital) => {
-                    let mov = self.gather_until(armies, loc, hide, nocapital);
+        let mut bot = SmartBot::new();
+        bot.update(State::new().diff(&state));
 
-                    if let Some(_) = mov {
-                        self.modes.push_front(
-                            Gather_until(armies, loc, hide, nocapital)
-                        );
-                    }
+        let (moves, reward) = bot.gather(10, 181, false, false);
 
-                    Move::opt(mov)
-                }
-                Expand_strand(loc, time) => {
-                    let moves = self.expand_strand(loc, time);
-
-                    if moves.is_empty() {
-                        None
-                    } else {
-                        self.moves.extend(moves[1..].iter().copied());
-
-                        Some(Move::tup(moves[0]))
-                    }
-                }
-                Wait(time) => {
-                    if time > 0 {
-                        self.modes.push_front(Wait(time - 1));
-                    }
-
-                    Some(Move::new(0, 0, false))
-                }
-                Probe_from(loc, player) => {
-                    if let Some(mov) = self.probe(loc, player) {
-                        self.modes.push_front(Probe_from(mov.1, player));
-
-                        Some(Move::tup(mov))
-                    } else {
-                        None
-                    }
-                }
-            }
-        } else {
-            None
-        }
+        assert_eq!(moves, vec![(180, 181)]);
+        assert_eq!(reward, 7);
     }
 }

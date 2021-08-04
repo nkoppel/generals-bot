@@ -1,3 +1,4 @@
+use std::mem;
 use super::state::*;
 
 fn to_1d(width: usize, x: isize, y: isize) -> isize {
@@ -103,7 +104,7 @@ impl State {
         ];
 
         let player = player as isize;
-        let mut out = self.copy_fog();
+        let mut out = self.add_fog();
 
         for loc in 0..self.terrain.len() {
             if self.terrain[loc] == player {
@@ -276,12 +277,14 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn new(state: State, mut players: Vec<Box<dyn Player>>) -> Self {
+    pub fn new(mut state: State, mut players: Vec<Box<dyn Player>>) -> Self {
         let player_states = vec![State::new(); state.generals.len()];
 
         for i in 0..players.len() {
             players[i].init(i);
         }
+
+        state.remove_fog();
 
         Self {
             state,
@@ -294,7 +297,11 @@ impl Simulator {
         self.state
     }
 
-    pub fn sim(&mut self, rounds: usize, wait: usize) -> Option<usize> {
+    pub fn get_players(&mut self) -> Vec<Box<dyn Player>> {
+        mem::take(&mut self.players)
+    }
+
+    pub fn sim(&mut self, rounds: usize, wait: usize, predict: bool) -> Option<usize> {
         let wait = Duration::from_millis(wait as u64);
 
         self.state.incr_armies();
@@ -320,7 +327,7 @@ impl Simulator {
 
                     let mov = self.players[player].get_move(diff);
 
-                    println!("{:?}", mov);
+                    // println!("{:?}", mov);
                     moves.push(mov);
 
                     self.player_states[player] = player_state;
@@ -331,19 +338,21 @@ impl Simulator {
                 }
             }
 
+            if !predict && active_players <= 1 {
+                return Some(last_active);
+            }
+
             for player in 0..self.state.generals.len() {
                 if let Some(mov) = moves[player] {
                     state.do_move(player, mov);
                 }
             }
 
-            if active_players <= 1 {
-                return Some(last_active);
-            }
-
             self.state = state;
 
-            // println!("{}", self.state);
+            if !predict {
+                println!("{}", self.state);
+            }
 
             thread::sleep(wait.saturating_sub(time_spent.elapsed()));
         }

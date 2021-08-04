@@ -223,6 +223,7 @@ impl Client {
     }
 }
 
+#[allow(non_snake_case)]
 #[derive(Deserialize)]
 struct GameUpdate {
     scores: Vec<HashMap<String, Value>>,
@@ -262,6 +263,7 @@ fn diff_from_value(val: &Value) -> StateDiff {
     }
 }
 
+#[allow(non_snake_case)]
 #[derive(Deserialize)]
 pub struct GameStart {
     pub chat_room: String,

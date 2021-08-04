@@ -83,6 +83,14 @@ impl Move {
             Some(m) => Some(Self::tup(m))
         }
     }
+
+    pub fn tups(vec: Vec<(usize, usize)>) -> Vec<Self> {
+        vec.into_iter().map(Move::tup).collect()
+    }
+
+    pub fn opts(vec: Vec<(usize, usize)>) -> Vec<Option<Self>> {
+        vec.into_iter().map(|m| Some(Move::tup(m))).collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -120,10 +128,11 @@ impl State {
         }
     }
 
-    pub fn copy_fog(&self) -> Self {
+    pub fn add_fog(&self) -> Self {
         let mut out = self.clone();
         let size = self.size();
 
+        out.cities = Vec::new();
         out.armies = vec![0; size];
         out.generals = vec![-1; self.generals.len()];
 
@@ -140,6 +149,16 @@ impl State {
         }
 
         out
+    }
+
+    pub fn remove_fog(&mut self) {
+        for i in 0..self.terrain.len() {
+            self.terrain[i] =  match self.terrain[i] {
+                -3 => -1,
+                -4 => -2,
+                n => n
+            }
+        }
     }
 
     pub fn size(&self) -> usize {
