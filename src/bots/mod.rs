@@ -1,8 +1,8 @@
 use super::state::*;
 use super::simulator::*;
 
-mod random_bot;
+mod simple_bots;
 mod smart_bot;
 
-pub use random_bot::*;
+pub use simple_bots::*;
 pub use smart_bot::*;
