@@ -9,6 +9,7 @@ mod actions;
 mod strategy;
 
 use path_optimization::*;
+pub use actions::*;
 pub use strategy::*;
 
 const FL_ATTEMPTS: usize = 10;
@@ -22,7 +23,9 @@ pub struct SmartBot {
     player_cities_tmp: Vec<usize>,
     player_cities: Vec<usize>,
     player: usize,
-    previous_action: Action
+    action_gens: Vec<Box<dyn Action>>,
+    previous_action: Box<dyn Action>,
+    previous_type: usize
 }
 
 impl SmartBot {
@@ -36,14 +39,16 @@ impl SmartBot {
             player_cities_tmp: Vec::new(),
             player_cities: Vec::new(),
             player: 0,
-            previous_action: Action::empty()
+            action_gens: init_action_gens(),
+            previous_action: Box::new(NoneAction{}),
+            previous_type: 0
         }
     }
 
-    fn update(&mut self, diff: StateDiff) {
+    fn update(&mut self, state: &State) {
         self.old_state = self.state.clone();
 
-        self.state.patch(diff);
+        self.state = state.clone();
 
         if self.player_cities.is_empty() {
             self.player_cities = vec![1; self.state.generals.len()];

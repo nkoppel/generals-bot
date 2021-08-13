@@ -246,7 +246,7 @@ impl State {
         true
     }
 
-    pub fn get_random_move(&mut self, player: usize) -> Option<Move> {
+    pub fn get_random_move(&self, player: usize) -> Option<Move> {
         let mut rng = thread_rng();
 
         let start = select_rand_eq(&self.terrain, &(player as isize)).unwrap();
@@ -263,8 +263,8 @@ impl State {
 }
 
 pub trait Player {
-    fn init(&mut self, player: usize);
-    fn get_move(&mut self, diff: StateDiff) -> Option<Move>;
+    fn reset(&mut self) {}
+    fn get_move(&mut self, state: &State, player: usize) -> Option<Move>;
 }
 
 use std::thread;
@@ -272,23 +272,15 @@ use std::time::{Duration, Instant};
 
 pub struct Simulator {
     state: State,
-    player_states: Vec<State>,
     players: Vec<Box<dyn Player>>,
 }
 
 impl Simulator {
     pub fn new(mut state: State, mut players: Vec<Box<dyn Player>>) -> Self {
-        let player_states = vec![State::new(); state.generals.len()];
-
-        for i in 0..players.len() {
-            players[i].init(i);
-        }
-
         state.remove_fog();
 
         Self {
             state,
-            player_states,
             players,
         }
     }
@@ -323,14 +315,11 @@ impl Simulator {
             for player in 0..self.state.generals.len() {
                 if self.state.generals[player] >= 0 {
                     let player_state = self.state.get_player_state(player);
-                    let diff = self.player_states[player].diff(&player_state);
-
-                    let mov = self.players[player].get_move(diff);
+                    let mov = self.players[player].get_move(&player_state, player);
 
                     // println!("{:?}", mov);
                     moves.push(mov);
 
-                    self.player_states[player] = player_state;
                     active_players += 1;
                     last_active = player;
                 } else {

@@ -191,16 +191,17 @@ impl Client {
             return GameConnectionLost;
         }
 
+        let mut state = State::new();
         let mut tmp = self.get_diff();
 
         println!("{}", Local::now().format("[ %T %D ]"));
         println!("Entering new {} match.", start.game_type);
         println!("Players: {}.", start.usernames.join(" | "));
         println!("Replay will be available at http://bot.generals.io/replays/{}", start.replay_id);
-        player.init(start.playerIndex);
 
         while let Ok(diff) = tmp {
-            let mov = player.get_move(diff);
+            state.patch(diff);
+            let mov = player.get_move(&state, start.playerIndex);
 
             self.send_move(mov);
             tmp = self.get_diff();
