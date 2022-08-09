@@ -2,7 +2,6 @@ use super::state::*;
 use super::simulator::*;
 
 mod simple_bots;
-mod smart_bot;
+mod path_optimization;
 
 pub use simple_bots::*;
-pub use smart_bot::*;

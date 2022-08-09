@@ -3,15 +3,11 @@ use super::*;
 pub type Path = (f64, Vec<usize>);
 pub type Paths = Vec<Path>;
 
-fn better_path(p1: &mut Path, p2: Path) {
-    if p2.0 > p1.0 {
-        *p1 = p2;
-    }
-}
-
 fn combine_simple(_: f64, _: usize, paths1: &mut Paths, paths2: Paths) {
     for (p1, p2) in paths1.iter_mut().zip(paths2.into_iter()) {
-        better_path(p1, p2);
+        if p2.0 > p1.0 {
+            *p1 = p2;
+        }
     }
 }
 
@@ -36,7 +32,7 @@ fn combine_branch(reward: f64, len: usize, paths1: &mut Paths, paths2: Paths) {
     *paths1 = out;
 }
 
-use std::collections::{VecDeque, BinaryHeap};
+use std::collections::VecDeque;
 
 pub struct Pather<'a> {
     width: usize,

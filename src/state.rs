@@ -252,6 +252,14 @@ impl State {
     }
 }
 
+pub fn display_turn(turn: usize) -> String {
+    if turn % 2 == 0 {
+        format!("{} ", turn / 2)
+    } else {
+        format!("{}.", turn / 2)
+    }
+}
+
 fn pad_front(c: char, len: usize, s: &str) -> String {
     let mut out = String::new();
 
@@ -277,7 +285,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let player_colors = vec![Red, Blue, Green, Cyan, Magenta];
 
-        writeln!(f, "{}", self.turn)?;
+        writeln!(f, "{}", display_turn(self.turn))?;
 
         for y in 0..self.height {
             for x in 0..self.width {

@@ -1,17 +1,30 @@
 use super::state::*;
 use super::simulator::Player;
 
-use std::{thread, time};
+use std::{thread, time::Duration};
+use std::net::TcpStream;
 
 use tungstenite::*;
 use tungstenite::Message::*;
-use tungstenite::client::AutoStream;
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::Error::*;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use chrono::prelude::*;
+
+#[macro_export]
+macro_rules! log {
+    ($type:literal; $( $format_args:tt ),+) => {
+        println!("{} {{ {} }} {}", Local::now().format("[ %T %D ]"), $type, format!($( $format_args ),+));
+    };
+    ($( $format_args:tt ),+) => {
+        println!("{} {}", Local::now().format("[ %T %D ]"), format!($( $format_args ),+));
+    }
+}
+
+const SLEEP_TIME: u64 = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameErr {
@@ -23,7 +36,7 @@ pub enum GameErr {
 pub use GameErr::*;
 
 pub struct Client {
-    socket: WebSocket<AutoStream>,
+    socket: WebSocket<MaybeTlsStream<TcpStream>>,
     url: String,
     id: String
 }
@@ -67,7 +80,7 @@ impl Client {
 
     pub fn set_force_start(&mut self, game_id: &str) {
         let msg = json!(["set_force_start", game_id, true]);
-        let second = time::Duration::from_millis(1000);
+        let second = Duration::from_secs(1);
 
         self.ping();
         self.send_message(msg.clone());
@@ -98,7 +111,7 @@ impl Client {
 
     pub fn debug_listen(&mut self) {
         self.ping();
-        let second = time::Duration::from_millis(1000);
+        let second = Duration::from_secs(1);
 
         loop {
             match self.socket.read_message() {
@@ -106,15 +119,13 @@ impl Client {
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
                     if let Ok(val) = serde_json::from_str::<Value>(&s[2..]) {
-                        println!("{}", val);
+                        log!("{}", val);
                     } else {
-                        println!("Ok({:?})", s);
+                        log!("Ok({:?})", s);
                     }
-                    println!();
                 }
                 msg => {
-                    println!("{:?}", msg);
-                    println!();
+                    log!("{:?}", msg);
                 }
             }
         }
@@ -191,34 +202,40 @@ impl Client {
             return GameConnectionLost;
         }
 
-        let mut state = State::new();
         let mut tmp = self.get_diff();
 
+<<<<<<< HEAD
+        log!("Join match"; "type: {}", (start.game_type));
+        log!("Join match"; "players: {}", (start.usernames.join(" | ")));
+        log!("Join match"; "replay url: http://bot.generals.io/replays/{}", (start.replay_id));
+=======
         println!("{}", Local::now().format("[ %T %D ]"));
         println!("Entering new {} match.", start.game_type);
         println!("Players: {}.", start.usernames.join(" | "));
         println!("Replay will be available at http://bot.generals.io/replays/{}", start.replay_id);
+        player.init(start.playerIndex);
+>>>>>>> parent of bedf2da (add action system)
 
         while let Ok(diff) = tmp {
-            state.patch(diff);
-            let mov = player.get_move(&state, start.playerIndex);
+            let mov = player.get_move(diff);
 
             self.send_move(mov);
             tmp = self.get_diff();
         }
 
-        println!("Result: {:?}", tmp.clone().unwrap_err());
-        println!("{}", Local::now().format("[ %T %D ]"));
-        println!();
+        log!("Leave match"; "result: {:?}", (tmp.clone().unwrap_err()));
         return tmp.unwrap_err();
     }
 
     pub fn run_1v1(&mut self, mut player: &mut Box<dyn Player>) {
         loop {
+            log!("Join 1v1"; "");
             self.join_1v1();
 
             if self.run_player(&mut player) == GameConnectionLost {
                 self.socket = connect(&self.url).expect("Unable to connect").0;
+            // } else {
+                // thread::sleep(Duration::from_secs(SLEEP_TIME));
             }
         }
     }
