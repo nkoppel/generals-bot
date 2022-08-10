@@ -3,11 +3,13 @@
 
 mod state;
 mod simulator;
+mod replays;
 mod bots;
 mod client;
 
 use state::*;
 use simulator::*;
+use replays::*;
 use bots::*;
 use client::*;
 
@@ -21,23 +23,25 @@ fn main() {
 
     // client.join_private(&args[2]);
     // client.set_force_start(&args[2]);
-    // client.run_player(Box::new(SmartBot::new()));
+    // client.run_player(&mut (Box::new(RandomBot{}) as Box<dyn Player>));
     // client.debug_listen();
 
-    let players =
-        vec![
-<<<<<<< HEAD
-            Box::new(RandomBot{}) as Box<dyn Player>,
-            Box::new(RandomBot{}),
-=======
-            Box::new(SmartBot::new()) as Box<dyn Player>,
-            Box::new(RandomBot::new())
->>>>>>> parent of bedf2da (add action system)
-        ];
+    // let players =
+        // vec![
+            // Box::new(RandomBot{}) as Box<dyn Player>,
+            // Box::new(RandomBot{}),
+            // Box::new(RandomBot{}),
+        // ];
 
-    let state = State::generate(18, 18, 60, 10, 2);
+    // let mut state = State::generate(18, 18, 60, 10, 3);
 
-    let mut sim = Simulator::new(state, players);
+    // state.teams = vec![0, 0, 1];
 
-    sim.sim(100000, 250, false);
+    // let mut sim = Simulator::new(state, players);
+
+    // sim.sim(100000, 0, false);
+
+    // let mut sim = Replay::read_from_file("SYZZLhOLl.gioreplay").to_simulator();
+
+    // sim.sim(1000000, 0, true);
 }
