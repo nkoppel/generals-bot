@@ -18,8 +18,8 @@ impl Player for NoneBot {
 }
 
 pub struct PlayBackBot {
-    moves: Vec<Option<Move>>,
-    start_turn: usize
+    pub moves: Vec<Option<Move>>,
+    pub start_turn: usize
 }
 
 impl PlayBackBot {
@@ -33,7 +33,7 @@ impl PlayBackBot {
 
 impl Player for PlayBackBot {
     fn get_move(&mut self, state: &State, _: usize) -> Option<Move> {
-        self.moves.get(state.turn - self.start_turn).cloned().unwrap_or(None)
+        self.moves.get(state.turn.wrapping_sub(self.start_turn)).cloned().unwrap_or(None)
     }
 }
 

@@ -29,47 +29,26 @@ pub fn get_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
     out
 }
 
-pub fn get_vis_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
-    let mut out = Vec::new();
+pub fn select_rand<F: Fn(usize) -> bool>(len: usize, f: F) -> Option<usize> {
+    let mut num_true = 0;
 
-    let iwidth = width as isize;
-    let mut ds = vec![1, iwidth - 1, iwidth, iwidth + 1];
-
-    ds.extend(ds.clone().iter().map(|x| -*x));
-
-    let size = width * height;
-
-    for d in ds {
-        let loc2 = loc as isize + d;
-
-        if loc2 >= 0 && loc2 < size as isize {
-            out.push(loc2 as usize);
+    for i in 0..len {
+        if f(i) {
+            num_true += 1;
         }
     }
 
-    out
-}
-
-pub fn select_rand_eq<T: PartialEq>(vec: &[T], item: &T) -> Option<usize> {
-    let mut num_eq = 0;
-
-    for i in vec.iter() {
-        if *i == *item {
-            num_eq += 1;
-        }
-    }
-
-    if num_eq == 0 {
+    if num_true == 0 {
         return None;
     }
 
     let mut rng = thread_rng();
 
-    let n = rng.gen_range(0..num_eq) + 1;
+    let n = rng.gen_range(0..num_true) + 1;
     let mut j = 0;
 
-    for i in 0..vec.len() {
-        if vec[i] == *item {
+    for i in 0..len {
+        if f(i) {
             j += 1;
         }
         if j == n {
@@ -80,16 +59,18 @@ pub fn select_rand_eq<T: PartialEq>(vec: &[T], item: &T) -> Option<usize> {
     None
 }
 
+pub fn select_rand_eq<T: PartialEq>(vec: &[T], item: &T) -> Option<usize> {
+    select_rand(vec.len(), |i| vec[i] == *item)
+}
+
 impl State {
     pub fn update_scores(&mut self) {
-        self.scores = vec![(0, 0); self.generals.len()];
+        self.scores.fill((0, 0));
 
         for i in 0..self.terrain.len() {
-            if self.terrain[i] >= 0 {
-                let player = self.terrain[i] as usize;
-
-                self.scores[player].0 += 1;
-                self.scores[player].1 += self.armies[i] as usize;
+            if let player @ 1.. = self.terrain[i] {
+                self.scores[player as usize].0 += 1;
+                self.scores[player as usize].1 += self.armies[i] as usize;
             }
         }
     }
@@ -101,24 +82,25 @@ impl State {
             (-1,  1), ( 0,  1), ( 1,  1),
         ];
 
+        let team = self.teams[player];
         let player = player as isize;
         let mut out = self.add_fog();
 
         for loc in 0..self.terrain.len() {
-            if self.terrain[loc] == player {
+            if self.teams.get(self.terrain[loc] as usize) == Some(&team) {
                 let (x, y) = from_1d(self.width, loc as isize);
 
                 for (xi, yi) in &deltas {
                     let x2 = x + xi;
                     let y2 = y + yi;
 
-                    let loc2 = to_1d(self.width, x2, y2) as usize;
-
                     if  x2 >= 0 &&
                         y2 >= 0 &&
                         x2 < self.width  as isize &&
                         y2 < self.height as isize
                     {
+                        let loc2 = to_1d(self.width, x2, y2) as usize;
+
                         out.terrain[loc2] = self.terrain[loc2];
                         out.armies[loc2] = self.armies[loc2];
 
@@ -153,13 +135,16 @@ impl State {
     }
 
     pub fn incr_armies(&mut self) {
+        self.turn += 1;
+
         if self.turn % 50 == 0 {
             for i in 0..self.terrain.len() {
                 if self.terrain[i] >= 0 {
                     self.armies[i] += 1;
                 }
             }
-        } else if self.turn % 2 == 0 {
+        }
+        if self.turn % 2 == 0 {
             for i in &self.cities {
                 if self.terrain[*i as usize] >= 0 {
                     self.armies[*i as usize] += 1;
@@ -172,8 +157,6 @@ impl State {
                 }
             }
         }
-
-        self.turn += 1;
     }
 
     fn capture_player(&mut self, p1: usize, p2: usize) {
@@ -188,7 +171,7 @@ impl State {
     }
 
     pub fn move_is_valid(&self, player: usize, mov: Move) -> bool {
-        let d = (mov.start as isize - mov.end as isize).abs() as usize;
+        let d = (mov.start as isize).abs_diff(mov.end as isize) as usize;
         let size = self.armies.len();
         let mut ret = false;
 
@@ -228,6 +211,12 @@ impl State {
 
         if player2 == player as isize {
             self.armies[mov.end] += transferred;
+        } else if self.teams.get(player) == self.teams.get(player2 as usize) {
+            self.armies[mov.end] += transferred;
+
+            if self.generals[player2 as usize] != mov.end as isize {
+                self.terrain[mov.end] = player as isize;
+            }
         } else {
             if transferred > self.armies[mov.end] {
                 if player2 >= 0 && self.generals[player2 as usize] == mov.end as isize {
@@ -244,11 +233,13 @@ impl State {
         true
     }
 
-    pub fn get_random_move(&mut self, player: usize) -> Option<Move> {
+    pub fn get_random_move(&self, player: usize) -> Option<Move> {
         let mut rng = thread_rng();
 
-        let start = select_rand_eq(&self.terrain, &(player as isize)).unwrap();
-        let neighbors = get_neighbors(self.width, self.height, start);
+        let start = select_rand(self.terrain.len(), |i| self.terrain[i] == player as isize && self.armies[i] > 1)?;
+        let mut neighbors = get_neighbors(self.width, self.height, start);
+
+        neighbors.retain(|i| self.terrain[*i] >= -1);
 
         if neighbors.is_empty() {
             return None;
@@ -261,8 +252,7 @@ impl State {
 }
 
 pub trait Player {
-    fn init(&mut self, player: usize);
-    fn get_move(&mut self, diff: StateDiff) -> Option<Move>;
+    fn get_move(&mut self, state: &State, player: usize) -> Option<Move>;
 }
 
 use std::thread;
@@ -278,11 +268,8 @@ impl Simulator {
     pub fn new(mut state: State, mut players: Vec<Box<dyn Player>>) -> Self {
         let player_states = vec![State::new(); state.generals.len()];
 
-        for i in 0..players.len() {
-            players[i].init(i);
-        }
-
         state.remove_fog();
+        state.update_scores();
 
         Self {
             state,
@@ -299,56 +286,62 @@ impl Simulator {
         mem::take(&mut self.players)
     }
 
-    pub fn sim(&mut self, rounds: usize, wait: usize, predict: bool) -> Option<usize> {
-        let wait = Duration::from_millis(wait as u64);
+    pub fn step(&mut self) {
+        let mut moves = vec![None; self.state.generals.len()];
+
+        for player in 0..self.state.generals.len() {
+            let player_state = self.state.get_player_state(player);
+
+            moves[player] = self.players[player].get_move(&player_state, player);
+            self.player_states[player] = player_state;
+        }
+
+        for mut player in 0..self.state.generals.len() {
+            if self.state.turn % 2 == 1 {
+                player = self.state.generals.len() - 1 - player
+            }
+
+            if let Some(mov) = moves[player] {
+                self.state.do_move(player, mov);
+            }
+        }
 
         self.state.incr_armies();
-        self.state.turn -= 1;
+        self.state.update_scores();
+    }
 
-        // println!("{}", self.state);
+    // if game is over, return the id of the team that won
+    pub fn game_over(&self) -> Option<usize> {
+        let mut active_team = None;
+
+        for (player, general) in self.state.generals.iter().enumerate() {
+            if *general > -2 {
+                let team = self.state.teams[player] as usize;
+
+                if active_team.is_some() && active_team != Some(team) {
+                    return None;
+                }
+
+                active_team = Some(team);
+            }
+        }
+
+        active_team
+    }
+
+    pub fn sim(&mut self, rounds: usize, wait: usize, spectate: bool) -> Option<usize> {
+        let wait = Duration::from_millis(wait as u64);
 
         for _ in 0..rounds {
-            self.state.incr_armies();
-            self.state.update_scores();
-
-            let mut state = self.state.clone();
-            let mut moves = Vec::new();
-            let mut active_players = 0;
-            let mut last_active = 0;
-
             let time_spent = Instant::now();
 
-            for player in 0..self.state.generals.len() {
-                if self.state.generals[player] >= 0 {
-                    let player_state = self.state.get_player_state(player);
-                    let diff = self.player_states[player].diff(&player_state);
+            self.step();
 
-                    let mov = self.players[player].get_move(diff);
-
-                    // println!("{:?}", mov);
-                    moves.push(mov);
-
-                    self.player_states[player] = player_state;
-                    active_players += 1;
-                    last_active = player;
-                } else {
-                    moves.push(None);
-                }
+            if let out @ Some(_) = self.game_over() {
+                return out;
             }
 
-            if !predict && active_players <= 1 {
-                return Some(last_active);
-            }
-
-            for player in 0..self.state.generals.len() {
-                if let Some(mov) = moves[player] {
-                    state.do_move(player, mov);
-                }
-            }
-
-            self.state = state;
-
-            if !predict {
+            if spectate {
                 println!("{}", self.state);
             }
 

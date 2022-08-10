@@ -102,7 +102,8 @@ pub struct State {
     pub armies: Vec<isize>,
     pub cities: Vec<isize>,
     pub generals: Vec<isize>,
-    pub scores: Vec<(usize, usize)>
+    pub scores: Vec<(usize, usize)>,
+    pub teams: Vec<isize>,
 }
 
 #[derive(Clone, Debug)]
@@ -119,12 +120,20 @@ impl State {
         Self {
             width: 0,
             height: 0,
-            turn: 0,
+            turn: 1,
             terrain: Vec::new(),
             armies: Vec::new(),
             cities: Vec::new(),
             generals: Vec::new(),
-            scores: Vec::new()
+            scores: Vec::new(),
+            teams: Vec::new(),
+        }
+    }
+
+    pub fn with_teams(teams: Vec<isize>) -> Self {
+        Self {
+            teams,
+            .. Self::new()
         }
     }
 
@@ -182,12 +191,13 @@ impl State {
         let mut out = Self {
             width,
             height,
-            turn: 0,
+            turn: 1,
             terrain: vec![TILE_EMPTY; size],
             armies: vec![0; size],
             cities: Vec::new(),
             generals: vec![0; nplayers],
             scores: vec![(0, 0); nplayers],
+            teams: (0..nplayers as isize).collect::<Vec<_>>(),
         };
 
         for _ in 0..nmountians {
@@ -204,6 +214,7 @@ impl State {
         for j in 0..nplayers {
             out.generals[j] = tiles[i] as isize;
             out.terrain[tiles[i]] = j as isize;
+            out.armies[tiles[i]] = 1;
             i += 1;
         }
 
@@ -249,6 +260,10 @@ impl State {
         self.cities = patch(&self.cities, &diff.cities_diff);
         self.generals = diff.generals;
         self.scores = diff.scores;
+
+        if self.teams.is_empty() {
+            self.teams = (0..self.generals.len() as isize).collect();
+        }
     }
 }
 
@@ -280,6 +295,16 @@ use std::fmt;
 
 use colored::*;
 use colored::Color::*;
+
+fn show_num(n: usize) -> String {
+    match n {
+        0                       => "".to_string(),
+        1..=9_999               => format!("{}", n),
+        10_000..=999_999        => format!("{}K", n / 1000),
+        1_000_000..=999_999_999 => format!("{}M", n / 1_000_000),
+        _                       => format!("{}B", n / 1_000_000_000),
+    }
+}
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -322,12 +347,7 @@ impl fmt::Display for State {
                     }
                 }
 
-                let num =
-                    if self.armies[i] == 0 {
-                        "".to_string()
-                    } else {
-                        format!("{}", self.armies[i])
-                    };
+                let num = show_num(self.armies[i] as usize);
 
                 write!(f, "{} ", pad_front(pad, 4, &num).on_color(back).color(front))?;
             }

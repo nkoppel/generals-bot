@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 
 use chrono::prelude::*;
 
+const SECOND: Duration = Duration::from_secs(1);
+
 #[macro_export]
 macro_rules! log {
     ($type:literal; $( $format_args:tt ),+) => {
@@ -80,7 +82,6 @@ impl Client {
 
     pub fn set_force_start(&mut self, game_id: &str) {
         let msg = json!(["set_force_start", game_id, true]);
-        let second = Duration::from_secs(1);
 
         self.ping();
         self.send_message(msg.clone());
@@ -88,7 +89,7 @@ impl Client {
         loop {
             match self.socket.read_message() {
                 Ok(Pong(_)) => {
-                    thread::sleep(second);
+                    thread::sleep(SECOND);
                     self.ping();
                     self.send_message(msg.clone());
                 },
@@ -111,11 +112,10 @@ impl Client {
 
     pub fn debug_listen(&mut self) {
         self.ping();
-        let second = Duration::from_secs(1);
 
         loop {
             match self.socket.read_message() {
-                Ok(Pong(_)) => {thread::sleep(second); self.ping()},
+                Ok(Pong(_)) => {thread::sleep(SECOND); self.ping()},
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
                     if let Ok(val) = serde_json::from_str::<Value>(&s[2..]) {
@@ -164,7 +164,6 @@ impl Client {
                     } else if c == "game_lost" {
                         return Some(Err(GameLost));
                     } else if c == "game_update" {
-                        // println!("{}", s);
                         return Some(Ok(diff_from_value(&arr[1])));
                     }
                 }
@@ -202,29 +201,26 @@ impl Client {
             return GameConnectionLost;
         }
 
-        let mut tmp = self.get_diff();
-
-<<<<<<< HEAD
         log!("Join match"; "type: {}", (start.game_type));
         log!("Join match"; "players: {}", (start.usernames.join(" | ")));
         log!("Join match"; "replay url: http://bot.generals.io/replays/{}", (start.replay_id));
-=======
-        println!("{}", Local::now().format("[ %T %D ]"));
-        println!("Entering new {} match.", start.game_type);
-        println!("Players: {}.", start.usernames.join(" | "));
-        println!("Replay will be available at http://bot.generals.io/replays/{}", start.replay_id);
-        player.init(start.playerIndex);
->>>>>>> parent of bedf2da (add action system)
 
-        while let Ok(diff) = tmp {
-            let mov = player.get_move(diff);
+        let player_index = start.playerIndex;
+        let mut state = State::new();
 
-            self.send_move(mov);
-            tmp = self.get_diff();
+        loop {
+            let msg = self.get_diff();
+
+            if let Ok(diff) = msg {
+                state.patch(diff);
+
+                self.send_move(player.get_move(&state, player_index));
+            } else {
+                let err = msg.unwrap_err();
+                log!("Leave match"; "result: {:?}", err);
+                return err;
+            }
         }
-
-        log!("Leave match"; "result: {:?}", (tmp.clone().unwrap_err()));
-        return tmp.unwrap_err();
     }
 
     pub fn run_1v1(&mut self, mut player: &mut Box<dyn Player>) {
@@ -259,11 +255,11 @@ fn diff_from_value(val: &Value) -> StateDiff {
     let update: GameUpdate =
         serde_json::from_str(&serde_json::to_string(val).unwrap()).unwrap();
 
-    let helper = |o: Option<&Value>| {o.unwrap().as_i64().unwrap() as usize};
+    let as_usize = |o: Option<&Value>| {o.unwrap().as_i64().unwrap() as usize};
 
     let scores = update.scores
         .iter()
-        .map(|m| (helper(m.get("i")), helper(m.get("tiles")), helper(m.get("total"))))
+        .map(|m| (as_usize(m.get("i")), as_usize(m.get("tiles")), as_usize(m.get("total"))))
         .collect::<Vec<_>>();
 
     let mut scores2 = vec![(0, 0); scores.len()];
@@ -289,7 +285,8 @@ pub struct GameStart {
     pub playerIndex: usize,
     pub replay_id: String,
     pub swamps: Vec<isize>,
-    pub usernames: Vec<String>
+    pub usernames: Vec<String>,
+    pub teams: Vec<isize>,
 }
 
 impl Drop for Client {
