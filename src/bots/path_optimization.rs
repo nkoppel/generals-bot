@@ -62,8 +62,6 @@ impl<'a> Pather<'a> {
     }
 
     pub fn reset(&mut self) {
-        let size = self.obstacle.len();
-
         self.path_len.fill(usize::MAX);
         self.path_reward.fill(f64::NEG_INFINITY);
         self.parent.fill(usize::MAX);
@@ -465,6 +463,7 @@ pub fn nearest_zero_path(width: usize, distance: &Vec<usize>, mut loc: usize)
     }
 }
 
+#[allow(unused_imports)]
 mod tests {
     extern crate test;
 

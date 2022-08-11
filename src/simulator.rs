@@ -83,7 +83,6 @@ impl State {
         ];
 
         let team = self.teams[player];
-        let player = player as isize;
         let mut out = self.add_fog();
 
         for loc in 0..self.terrain.len() {
@@ -259,13 +258,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct Simulator {
-    state: State,
-    player_states: Vec<State>,
+    pub state: State,
+    pub player_states: Vec<State>,
     players: Vec<Box<dyn Player>>,
 }
 
 impl Simulator {
-    pub fn new(mut state: State, mut players: Vec<Box<dyn Player>>) -> Self {
+    pub fn new(mut state: State, players: Vec<Box<dyn Player>>) -> Self {
         let player_states = vec![State::new(); state.generals.len()];
 
         state.remove_fog();
@@ -286,15 +285,24 @@ impl Simulator {
         mem::take(&mut self.players)
     }
 
-    pub fn step(&mut self) {
+    pub fn get_moves(&mut self) -> Vec<Option<Move>> {
         let mut moves = vec![None; self.state.generals.len()];
 
-        for player in 0..self.state.generals.len() {
-            let player_state = self.state.get_player_state(player);
-
-            moves[player] = self.players[player].get_move(&player_state, player);
-            self.player_states[player] = player_state;
+        if self.player_states[0].turn != self.state.turn {
+            for (player, state) in self.player_states.iter_mut().enumerate() {
+                *state = self.state.get_player_state(player);
+            }
         }
+
+        for player in 0..self.state.generals.len() {
+            moves[player] = self.players[player].get_move(&self.player_states[player], player);
+        }
+
+        moves
+    }
+
+    pub fn step(&mut self) {
+        let moves = self.get_moves();
 
         for mut player in 0..self.state.generals.len() {
             if self.state.turn % 2 == 1 {

@@ -56,12 +56,12 @@ impl Client {
         let mut buf = "42".to_string();
         buf += &value.to_string();
 
-        self.socket.write_message(Text(buf));
-        self.socket.write_pending();
+        self.socket.write_message(Text(buf)).unwrap();
+        self.socket.write_pending().unwrap();
     }
 
     pub fn ping(&mut self) {
-        self.socket.write_message(Ping(Vec::new()));
+        self.socket.write_message(Ping(Vec::new())).unwrap();
     }
 
     pub fn set_username(&mut self, name: &str) {
@@ -291,7 +291,7 @@ pub struct GameStart {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        self.socket.close(None);
+        self.socket.close(None).unwrap();
 
         let mut tmp = self.socket.read_message();
 

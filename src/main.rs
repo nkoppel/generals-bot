@@ -1,5 +1,5 @@
 #![feature(test)]
-#![allow(unused)]
+#![allow(dead_code)]
 
 mod state;
 mod simulator;
@@ -7,16 +7,19 @@ mod replays;
 mod bots;
 mod client;
 
-use state::*;
-use simulator::*;
-use replays::*;
-use bots::*;
-use client::*;
-
-use std::env;
+#[allow(unused_imports)]
+use crate::{
+    state::*,
+    simulator::*,
+    replays::*,
+    bots::*,
+    client::*,
+};
 
 fn main() {
-    // let args: Vec<String> = env::args().collect();
+    use std::env;
+
+    let args: Vec<String> = env::args().collect();
     // let mut client = Client::new("wss://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
     // client.run_1v1(&mut (Box::new(SmartBot::new()) as Box<dyn Player>));
@@ -41,7 +44,15 @@ fn main() {
 
     // sim.sim(100000, 0, false);
 
-    // let mut sim = Replay::read_from_file("SYZZLhOLl.gioreplay").to_simulator();
+    // let (mut sim, len) = Replay::read_from_file("replays_prod/H5LmDhpUg.gioreplay").unwrap().to_simulator();
 
     // sim.sim(1000000, 0, true);
+
+    tch::maybe_init_cuda();
+    tch::Cuda::set_user_enabled_cudnn(true);
+    tch::Cuda::cudnn_set_benchmark(true);
+    println!("{} {}", tch::Cuda::is_available(), tch::Cuda::cudnn_is_available());
+    let mut nn = NN::new(4, &[128, 32, 32, 32], &[32, 32, 32, 32], 11, 8, 0.01);
+
+    train_from_replays(&args[1], &args[2], 1, &mut nn).unwrap()
 }

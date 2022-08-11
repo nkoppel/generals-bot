@@ -5,13 +5,13 @@ use crate::PlayBackBot;
 use std::io::Read;
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use anyhow::Result;
 
 #[derive(Clone, Debug, Deserialize)]
 struct ReplayMove {
     index: usize,
-    start: usize,
-    end: usize,
+    start: isize,
+    end: isize,
     is50: usize,
     turn: usize,
 }
@@ -41,17 +41,16 @@ pub struct Replay {
 }
 
 impl Replay {
-    pub fn from_reader<R: Read>(reader: R) -> Self {
-        serde_json::de::from_reader(reader).unwrap()
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self> {
+        Ok(serde_json::de::from_reader(reader)?)
     }
 
-    pub fn from_str(s: &str) -> Self {
-        serde_json::de::from_str(s).unwrap()
+    pub fn from_str(s: &str) -> Result<Self> {
+        Ok(serde_json::de::from_str(s)?)
     }
 
-    pub fn read_from_file(path: &str) -> Self {
-        Self::from_reader(std::fs::File::open(path).unwrap())
-
+    pub fn read_from_file(path: &str) -> Result<Self> {
+        Self::from_reader(std::fs::File::open(path)?)
     }
 
     pub fn num_players(&self) -> usize {
@@ -71,12 +70,12 @@ impl Replay {
             }
 
             moves[mov.index][turn] =
-                Some(Move{start: mov.start, end: mov.end, is50: mov.is50 != 0});
+                Some(Move{start: mov.start as usize, end: mov.end as usize, is50: mov.is50 != 0});
         }
 
         let turns = moves[0].len();
 
-        let mut bots = moves.into_iter().map(|moves| {
+        let bots = moves.into_iter().map(|moves| {
                 Box::new(
                     PlayBackBot {
                         moves,
