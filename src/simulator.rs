@@ -288,7 +288,7 @@ impl Simulator {
     pub fn get_moves(&mut self) -> Vec<Option<Move>> {
         let mut moves = vec![None; self.state.generals.len()];
 
-        if self.player_states[0].turn != self.state.turn {
+        if self.player_states[0].turn != self.state.turn || self.state.turn == 0 {
             for (player, state) in self.player_states.iter_mut().enumerate() {
                 *state = self.state.get_player_state(player);
             }

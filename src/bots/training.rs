@@ -7,7 +7,7 @@ use rand::{thread_rng, seq::SliceRandom};
 
 use tch::Tensor;
 
-fn train_from_replay(replay: &Replay, nn: &mut NN) {
+fn examples_from_replay(replay: &Replay, nn: &NN) -> (Vec<Tensor>, Vec<Tensor>) {
     let players = replay.num_players();
 
     let (mut sim, turns) = replay.to_simulator();
@@ -39,14 +39,40 @@ fn train_from_replay(replay: &Replay, nn: &mut NN) {
         }
     }
 
-    if features.len() > 0 {
-        nn.train(&Tensor::stack(&features, 0), &Tensor::stack(&expected, 0), 1);
+    (features, expected)
+}
+
+pub fn test_from_replays(replay_dir: &str, nn: &NN) -> Result<f64> {
+    println!("Testing network...");
+
+    let test_files = fs::read_dir(replay_dir)?
+        .filter(|e| e.is_ok() && e.as_ref().unwrap().file_type().unwrap().is_file())
+        .take(100)
+        .map(|e| e.unwrap().path().into_os_string().into_string().unwrap())
+        .collect::<Vec<_>>();
+
+    let mut loss = 0.;
+    let mut examples = 0;
+
+    for (i, filename) in test_files.iter().enumerate() {
+        let replay = Replay::read_from_file(filename)?;
+        let (features, expected) = examples_from_replay(&replay, &nn);
+
+        if features.len() > 0 {
+            loss += nn.test(&Tensor::stack(&features, 0), &Tensor::stack(&expected, 0));
+            examples += features.len();
+        }
+
+        println!("{}/100", i + 1);
     }
+
+    Ok(loss / examples as f64)
 }
 
 pub fn train_from_replays(replay_dir: &str, net_file_prefix: &str, epochs: usize, nn: &mut NN) -> Result<()> {
-    let mut test_files = fs::read_dir(replay_dir)?
+    let mut files = fs::read_dir(replay_dir)?
         .filter(|e| e.is_ok() && e.as_ref().unwrap().file_type().unwrap().is_file())
+        .skip(100)
         .map(|e| e.unwrap().path().into_os_string().into_string().unwrap())
         .collect::<Vec<_>>();
 
@@ -65,8 +91,6 @@ pub fn train_from_replays(replay_dir: &str, net_file_prefix: &str, epochs: usize
 
     // test_files = files2;
 
-    let mut files = test_files.split_off(100);
-
     let mut rng = thread_rng();
 
     for epoch in 0..epochs {
@@ -79,11 +103,18 @@ pub fn train_from_replays(replay_dir: &str, net_file_prefix: &str, epochs: usize
 
             println!("{}", filename);
             let replay = Replay::read_from_file(filename)?;
+            let (features, expected) = examples_from_replay(&replay, &nn);
 
-            train_from_replay(&replay, nn);
+            if features.len() > 0 {
+                nn.train(&Tensor::stack(&features, 0), &Tensor::stack(&expected, 0));
+            }
 
             if i % 100 == 0 && i > 0 {
                 nn.to_writer(&mut File::create(&format!("{}_{}_{}.gio_nn", net_file_prefix, epoch, i))?)?;
+            }
+
+            if i % 5000 == 0 {
+                println!("{}", test_from_replays(replay_dir, &nn)?);
             }
         }
     }

@@ -120,7 +120,7 @@ impl State {
         Self {
             width: 0,
             height: 0,
-            turn: 1,
+            turn: 0,
             terrain: Vec::new(),
             armies: Vec::new(),
             cities: Vec::new(),
@@ -191,7 +191,7 @@ impl State {
         let mut out = Self {
             width,
             height,
-            turn: 1,
+            turn: 0,
             terrain: vec![TILE_EMPTY; size],
             armies: vec![0; size],
             cities: Vec::new(),

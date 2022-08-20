@@ -1,7 +1,8 @@
 use super::*;
 
 use std::collections::HashMap;
-use std::io::{Read, Write, Seek};
+use std::io::{Read, Write, Cursor};
+use std::fs::File;
 
 use anyhow::{Result, Context};
 
@@ -112,13 +113,10 @@ impl FeatureGen {
     }
 }
 
-pub fn move_of_tensor(tensor: &Tensor) -> Move {
-    let max = tensor.flatten(0, tensor.dim() as i64)
+pub fn move_of_tensor(tensor: &Tensor, width: usize, height: usize) -> Move {
+    let max = tensor
         .max_dim(0, false).1
         .int64_value(&[]) as usize;
-
-    let width  = tensor.size()[2] as usize;
-    let height = tensor.size()[1] as usize;
 
     let start = max % (width * height);
 
@@ -142,12 +140,11 @@ pub fn tensor_of_move(mov: Move, width: usize, height: usize) -> Tensor {
             _   => 0,
         } + mov.is50 as usize * 4;
 
-    let index = vec![dir, mov.start / width, mov.start % width]
-        .into_iter()
-        .map(|x| Some(Tensor::of_slice(&[x as i64])))
-        .collect::<Vec<_>>();
+    let index = vec![Some(Tensor::of_slice(&[(mov.start + dir * width * height) as i64]))];
 
-    Tensor::zeros(&[8, height as i64, width as i64], (Kind::Float, Device::Cpu))
+    // Tensor::of_slice(&[(mov.start + dir * width * height) as i32])
+
+    Tensor::zeros(&[(8 * height * width) as i64], (Kind::Float, Device::Cpu))
         .index_put(&index, &Tensor::of_slice(&[1f32]), false)
 }
 
@@ -231,14 +228,19 @@ impl NN {
         Ok(())
     }
 
-    pub fn from_reader<R: Read + Seek>(reader: &mut R, rate: f64) -> Result<Self> {
+    pub fn from_reader<R: Read>(reader: &mut R, rate: f64) -> Result<Self> {
         let mut buf = [0; 8];
 
         reader.read_exact(&mut buf)?;
 
         let pool_size = i64::from_be_bytes(buf);
         let vs = VarStore::new(Device::cuda_if_available());
-        let named_tensors = Tensor::load_multi_from_stream_with_device(reader, vs.device())?
+
+        let mut buf = Vec::new();
+
+        reader.read_to_end(&mut buf)?;
+
+        let named_tensors = Tensor::load_multi_from_stream_with_device(Cursor::new(buf), vs.device())?
             .into_iter()
             .collect::<HashMap<_, _>>();
 
@@ -247,7 +249,7 @@ impl NN {
 
         for i in 0.. {
             if let Some(ws) = named_tensors.get(&format!("1w{}", i)) {
-                let mut layer = conv2d(&vs, 0, 0);
+                let mut layer = conv2d(&vs, 1, 1);
 
                 layer.ws = ws.copy();
                 layer.bs = named_tensors.get(&format!("1b{}", i)).map(Tensor::copy);
@@ -260,7 +262,7 @@ impl NN {
 
         for i in 0.. {
             if let Some(ws) = named_tensors.get(&format!("2w{}", i)) {
-                let mut layer = conv2d(&vs, 0, 0);
+                let mut layer = conv2d(&vs, 1, 1);
 
                 layer.ws = ws.copy();
                 layer.bs = named_tensors.get(&format!("2b{}", i)).map(Tensor::copy);
@@ -271,7 +273,7 @@ impl NN {
             }
         }
 
-        let mut output_layer = conv2d(&vs, 0, 0);
+        let mut output_layer = conv2d(&vs, 1, 1);
 
         output_layer.ws = named_tensors.get("ow").unwrap().copy();
         output_layer.bs = named_tensors.get("ob").map(Tensor::copy);
@@ -279,6 +281,10 @@ impl NN {
         let opt = Adam::default().build(&vs, rate).unwrap();
 
         Ok(NN { vs, pool_size, layer_stack1, layer_stack2, output_layer, opt })
+    }
+
+    pub fn from_file(name: &str, rate: f64) -> Result<Self> {
+        Self::from_reader(&mut File::open(name)?, rate)
     }
 
     pub fn forward(&self, inputs: &Tensor) -> Tensor {
@@ -309,6 +315,7 @@ impl NN {
 
         Tensor::concat(&[state1, state2], 1)
             .apply(&self.output_layer)
+            .flatten(1, 3)
     }
 
     pub fn set_rate(&mut self, rate: f64) {
@@ -317,25 +324,39 @@ impl NN {
 
     pub fn device(&self) -> Device {self.vs.device()}
 
-    pub fn train(&mut self, features: &Tensor, expected: &Tensor, epochs: usize) {
-        for i in 0..epochs {
+    pub fn test(&self, features: &Tensor, expected: &Tensor) -> f64 {
+        tch::no_grad(|| {
+            let mut loss = 0.;
             let mut iter = Iter2::new(&features, &expected, 256);
 
-            let iter2 = iter
-                .return_smaller_last_batch()
-                .to_device(self.device())
-                .shuffle();
-
-            for (features, expected) in iter2 {
-                let res = self.forward(&features);
-                let loss = res.cross_entropy_loss::<Tensor>(&expected, None, Reduction::Mean, -100, 0.);
-
-                // println!("{}", i);
-
-                // loss.print();
-
-                self.opt.backward_step(&loss);
+            for (features, expected) in iter.return_smaller_last_batch().to_device(self.device()) {
+                let out = self.forward(&features);
+                loss += out
+                    .cross_entropy_loss::<Tensor>(&expected, None, Reduction::Sum, -100, 0.)
+                    .double_value(&[])
             }
+
+            loss
+        })
+    }
+
+    pub fn train(&mut self, features: &Tensor, expected: &Tensor) {
+        let mut iter = Iter2::new(&features, &expected, 256);
+
+        let iter2 = iter
+            .return_smaller_last_batch()
+            .to_device(self.device())
+            .shuffle();
+
+        for (features, expected) in iter2 {
+            let res = self.forward(&features);
+            let loss = res.cross_entropy_loss::<Tensor>(&expected, None, Reduction::Mean, -100, 0.);
+
+            // println!("{}", i);
+
+            // loss.print();
+
+            self.opt.backward_step(&loss);
         }
     }
 }
@@ -346,6 +367,13 @@ pub struct NNBot {
 }
 
 impl NNBot {
+    pub fn from_file(file: &str) -> Result<Self> {
+        Ok(Self {
+            nn: NN::from_file(file, 0.)?,
+            feature_gen: FeatureGen::new()
+        })
+    }
+
     pub fn new(nn: NN) -> Self {
         Self {
             nn,
@@ -362,6 +390,6 @@ impl Player for NNBot {
         // disable gradient tracking to speed up network evaluation
         let tensor = tch::no_grad(|| self.nn.forward(&Tensor::stack(&[features], 0)));
 
-        Some(move_of_tensor(&tensor.i(0)))
+        Some(move_of_tensor(&tensor.i(0), state.width, state.height))
     }
 }
