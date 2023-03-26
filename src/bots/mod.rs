@@ -1,12 +1,8 @@
-use crate::state::*;
 use crate::simulator::*;
-use crate::replays::*;
+use crate::state::*;
 
-mod simple_bots;
-mod path_optimization;
 mod nn_bot;
-mod training;
+mod simple_bots;
 
-pub use simple_bots::*;
 pub use nn_bot::*;
-pub use training::*;
+pub use simple_bots::*;

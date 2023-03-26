@@ -1,5 +1,5 @@
-use std::mem;
 use super::state::*;
+use std::mem;
 
 fn to_1d(width: usize, x: isize, y: isize) -> isize {
     x + y * width as isize
@@ -9,24 +9,28 @@ fn from_1d(width: usize, loc: isize) -> (isize, isize) {
     (loc % width as isize, loc / width as isize)
 }
 
-pub fn get_neighbors(width: usize, height: usize, loc: usize) -> Vec<usize> {
-    let mut out = Vec::new();
+pub fn get_neighbor_mask(width: usize, height: usize, loc: usize) -> [bool; 4] {
     let size = width * height;
+    [
+        loc >= width,
+        loc < size && loc / width == (loc + 1) / width,
+        loc + width < size,
+        loc > 0 && loc / width == (loc - 1) / width,
+    ]
+}
 
-    if loc >= width {
-        out.push(loc - width);
-    }
-    if loc + width < size {
-        out.push(loc + width);
-    }
-    if loc > 0 && loc / width == (loc - 1) / width {
-        out.push(loc - 1);
-    }
-    if loc < size && loc / width == (loc + 1) / width {
-        out.push(loc + 1);
-    }
+pub fn get_neighbor_locs(width: usize, _height: usize, loc: usize) -> [usize; 4] {
+    [loc - width, loc + 1, loc + width, loc - 1]
+}
 
-    out
+pub fn get_neighbors(width: usize, height: usize, loc: usize) -> impl Iterator<Item = usize> {
+    let mask = get_neighbor_mask(width, height, loc);
+    let locs = get_neighbor_locs(width, height, loc);
+
+    mask
+        .into_iter()
+        .zip(locs.into_iter())
+        .filter_map(|(valid, loc)| valid.then_some(loc))
 }
 
 pub fn select_rand<F: Fn(usize) -> bool>(len: usize, f: F) -> Option<usize> {
@@ -77,9 +81,15 @@ impl State {
 
     pub fn get_player_state(&self, player: usize) -> Self {
         let deltas = vec![
-            (-1, -1), ( 0, -1), ( 1, -1),
-            (-1,  0), ( 0,  0), ( 1,  0),
-            (-1,  1), ( 0,  1), ( 1,  1),
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (0, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
         ];
 
         let team = self.teams[player];
@@ -93,17 +103,14 @@ impl State {
                     let x2 = x + xi;
                     let y2 = y + yi;
 
-                    if  x2 >= 0 &&
-                        y2 >= 0 &&
-                        x2 < self.width  as isize &&
-                        y2 < self.height as isize
-                    {
+                    if x2 >= 0 && y2 >= 0 && x2 < self.width as isize && y2 < self.height as isize {
                         let loc2 = to_1d(self.width, x2, y2) as usize;
 
                         out.terrain[loc2] = self.terrain[loc2];
                         out.armies[loc2] = self.armies[loc2];
 
-                        let tmp = self.generals
+                        let tmp = self
+                            .generals
                             .clone()
                             .iter_mut()
                             .position(|x| *x == loc2 as isize);
@@ -117,11 +124,10 @@ impl State {
         }
 
         for loc in &self.generals {
-            if *loc >= 0 {
-                if out.terrain[*loc as usize] == TILE_FOG_OBSTACLE {
-                    out.terrain[*loc as usize] = TILE_FOG
-                }
+            if *loc >= 0 && out.terrain[*loc as usize] == TILE_FOG_OBSTACLE {
+                out.terrain[*loc as usize] = TILE_FOG
             }
+
         }
 
         for loc in &self.cities {
@@ -170,7 +176,7 @@ impl State {
     }
 
     pub fn move_is_valid(&self, player: usize, mov: Move) -> bool {
-        let d = (mov.start as isize).abs_diff(mov.end as isize) as usize;
+        let d = mov.start.abs_diff(mov.end);
         let size = self.armies.len();
         let mut ret = false;
 
@@ -197,12 +203,11 @@ impl State {
             return false;
         }
 
-        let transferred =
-            if mov.is50 {
-                self.armies[mov.start] / 2
-            } else {
-                self.armies[mov.start] - 1
-            };
+        let transferred = if mov.is50 {
+            self.armies[mov.start] / 2
+        } else {
+            self.armies[mov.start] - 1
+        };
 
         self.armies[mov.start] -= transferred;
 
@@ -216,17 +221,15 @@ impl State {
             if self.generals[player2 as usize] != mov.end as isize {
                 self.terrain[mov.end] = player as isize;
             }
-        } else {
-            if transferred > self.armies[mov.end] {
-                if player2 >= 0 && self.generals[player2 as usize] == mov.end as isize {
-                    self.capture_player(player, player2 as usize);
-                }
-
-                self.terrain[mov.end] = player as isize;
-                self.armies[mov.end] = transferred - self.armies[mov.end];
-            } else {
-                self.armies[mov.end] -= transferred;
+        } else if transferred > self.armies[mov.end] {
+            if player2 >= 0 && self.generals[player2 as usize] == mov.end as isize {
+                self.capture_player(player, player2 as usize);
             }
+
+            self.terrain[mov.end] = player as isize;
+            self.armies[mov.end] = transferred - self.armies[mov.end];
+        } else {
+            self.armies[mov.end] -= transferred;
         }
 
         true
@@ -235,8 +238,10 @@ impl State {
     pub fn get_random_move(&self, player: usize) -> Option<Move> {
         let mut rng = thread_rng();
 
-        let start = select_rand(self.terrain.len(), |i| self.terrain[i] == player as isize && self.armies[i] > 1)?;
-        let mut neighbors = get_neighbors(self.width, self.height, start);
+        let start = select_rand(self.terrain.len(), |i| {
+            self.terrain[i] == player as isize && self.armies[i] > 1
+        })?;
+        let mut neighbors: Vec<usize> = get_neighbors(self.width, self.height, start).collect();
 
         neighbors.retain(|i| self.terrain[*i] >= -1);
 
@@ -294,6 +299,7 @@ impl Simulator {
             }
         }
 
+        #[allow(clippy::needless_range_loop)]
         for player in 0..self.state.generals.len() {
             moves[player] = self.players[player].get_move(&self.player_states[player], player);
         }
@@ -304,6 +310,7 @@ impl Simulator {
     pub fn step(&mut self) {
         let moves = self.get_moves();
 
+        #[allow(clippy::needless_range_loop)]
         for mut player in 0..self.state.generals.len() {
             if self.state.turn % 2 == 1 {
                 player = self.state.generals.len() - 1 - player

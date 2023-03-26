@@ -1,12 +1,12 @@
-pub const TILE_EMPTY       : isize = -1;
-pub const TILE_MOUNTAIN    : isize = -2;
-pub const TILE_FOG         : isize = -3;
+pub const TILE_EMPTY: isize = -1;
+pub const TILE_MOUNTAIN: isize = -2;
+pub const TILE_FOG: isize = -3;
 pub const TILE_FOG_OBSTACLE: isize = -4;
 
-pub use rand::thread_rng;
 pub use rand::random;
-pub use rand::Rng;
 pub use rand::seq::SliceRandom;
+pub use rand::thread_rng;
+pub use rand::Rng;
 
 fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
     let mut out = Vec::new();
@@ -41,47 +41,50 @@ fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
     out
 }
 
-fn patch(vec: &Vec<isize>, diff: &Vec<isize>) -> Vec<isize> {
+fn patch(vec: &[isize], diff: &[isize]) -> Vec<isize> {
     let mut out = Vec::new();
     let mut i = 0;
 
     while i < diff.len() {
-        if diff[i] != 0 {  // matching
+        if diff[i] != 0 {
+            // matching
             out.extend_from_slice(&vec[out.len()..out.len() + diff[i] as usize]);
         }
         i += 1;
 
-        if i < diff.len() && diff[i] != 0 {  // mismatching
+        if i < diff.len() && diff[i] != 0 {
+            // mismatching
             out.extend_from_slice(&diff[i + 1..i + 1 + diff[i] as usize]);
             i += diff[i] as usize;
         }
         i += 1;
     }
 
-    return out;
+    out
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Move {
     pub start: usize,
     pub end: usize,
-    pub is50: bool
+    pub is50: bool,
 }
 
 impl Move {
     pub fn new(start: usize, end: usize, is50: bool) -> Self {
-        Move{start, end, is50}
+        Move { start, end, is50 }
     }
 
     pub fn tup((start, end): (usize, usize)) -> Self {
-        Move{start, end, is50: false}
+        Move {
+            start,
+            end,
+            is50: false,
+        }
     }
 
     pub fn opt(mov: Option<(usize, usize)>) -> Option<Self> {
-        match mov {
-            None => None,
-            Some(m) => Some(Self::tup(m))
-        }
+        mov.map(Self::tup)
     }
 
     pub fn tups(vec: Vec<(usize, usize)>) -> Vec<Self> {
@@ -112,7 +115,7 @@ pub struct StateDiff {
     pub map_diff: Vec<isize>,
     pub cities_diff: Vec<isize>,
     pub generals: Vec<isize>,
-    pub scores: Vec<(usize, usize)>
+    pub scores: Vec<(usize, usize)>,
 }
 
 impl State {
@@ -133,7 +136,7 @@ impl State {
     pub fn with_teams(teams: Vec<isize>) -> Self {
         Self {
             teams,
-            .. Self::new()
+            ..Self::new()
         }
     }
 
@@ -162,10 +165,10 @@ impl State {
 
     pub fn remove_fog(&mut self) {
         for i in 0..self.terrain.len() {
-            self.terrain[i] =  match self.terrain[i] {
+            self.terrain[i] = match self.terrain[i] {
                 -3 => -1,
                 -4 => -2,
-                n => n
+                n => n,
             }
         }
     }
@@ -174,11 +177,21 @@ impl State {
         self.width * self.height
     }
 
-    pub fn generate(width: usize, height: usize, nmountians: usize, ncities: usize, nplayers: usize) -> Self {
+    pub fn generate(
+        width: usize,
+        height: usize,
+        nmountians: usize,
+        ncities: usize,
+        nplayers: usize,
+        player_distance: usize,
+    ) -> Self {
         let size = width * height;
 
         if nmountians + ncities + nplayers >= size {
-            panic!("Map is too small for {} mountians, {} cities, and {} players", nmountians, ncities, nplayers);
+            panic!(
+                "Map is too small for {} mountians, {} cities, and {} players",
+                nmountians, ncities, nplayers
+            );
         }
 
         let mut rng = thread_rng();
@@ -200,6 +213,40 @@ impl State {
             teams: (0..nplayers as isize).collect::<Vec<_>>(),
         };
 
+        let mut player_locs = Vec::new();
+
+        for j in 0..nplayers {
+            let mut successful = false;
+
+            for k in i..tiles.len() {
+                let min_dist = player_locs
+                    .iter()
+                    .map(|p| {
+                        (tiles[k] % width).abs_diff(*p % width)
+                            + (tiles[k] / width).abs_diff(*p / width)
+                    })
+                    .max()
+                    .unwrap_or(usize::MAX);
+
+                if min_dist >= player_distance {
+                    tiles.swap(i, k);
+
+                    out.generals[j] = tiles[i] as isize;
+                    out.terrain[tiles[i]] = j as isize;
+                    out.armies[tiles[i]] = 1;
+
+                    successful = true;
+                    player_locs.push(tiles[i]);
+                    i += 1;
+                    break;
+                }
+            }
+
+            if !successful {
+                panic!("unable to place players at specified distance");
+            }
+        }
+
         for _ in 0..nmountians {
             out.terrain[tiles[i]] = TILE_MOUNTAIN;
             i += 1;
@@ -208,13 +255,6 @@ impl State {
         for _ in 0..ncities {
             out.cities.push(tiles[i] as isize);
             out.armies[tiles[i]] = rng.gen_range(40..51);
-            i += 1;
-        }
-
-        for j in 0..nplayers {
-            out.generals[j] = tiles[i] as isize;
-            out.terrain[tiles[i]] = j as isize;
-            out.armies[tiles[i]] = 1;
             i += 1;
         }
 
@@ -229,8 +269,8 @@ impl State {
         out
     }
 
-    fn deserialize_map(&mut self, data: &Vec<isize>) {
-        self.width  = data[0] as usize;
+    fn deserialize_map(&mut self, data: &[isize]) {
+        self.width = data[0] as usize;
         self.height = data[1] as usize;
 
         let size = self.size();
@@ -248,7 +288,7 @@ impl State {
             map_diff: diff(&map1, &map2),
             cities_diff: diff(&self.cities, &new.cities),
             generals: new.generals.clone(),
-            scores: new.scores.clone()
+            scores: new.scores.clone(),
         }
     }
 
@@ -291,20 +331,20 @@ fn pad_front(c: char, len: usize, s: &str) -> String {
     out
 }
 
-use std::fmt;
-
-use colored::*;
-use colored::Color::*;
-
 fn show_num(n: usize) -> String {
     match n {
-        0                       => "".to_string(),
-        1..=9_999               => format!("{}", n),
-        10_000..=999_999        => format!("{}K", n / 1000),
+        0 => "".to_string(),
+        1..=9_999 => format!("{}", n),
+        10_000..=999_999 => format!("{}K", n / 1000),
         1_000_000..=999_999_999 => format!("{}M", n / 1_000_000),
-        _                       => format!("{}B", n / 1_000_000_000),
+        _ => format!("{}B", n / 1_000_000_000),
     }
 }
+
+use std::fmt;
+
+use colored::Color::*;
+use colored::*;
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -320,14 +360,15 @@ impl fmt::Display for State {
                 let mut front = White;
                 let pad;
 
-                let tmp = self.generals
+                let tmp = self
+                    .generals
                     .clone()
                     .iter_mut()
                     .position(|x| *x == i as isize);
 
                 if let Some(n) = tmp {
                     pad = '\\';
-                    front = player_colors[n as usize]
+                    front = player_colors[n]
                 } else if self.cities.contains(&(i as isize)) {
                     pad = '0';
 
@@ -338,8 +379,14 @@ impl fmt::Display for State {
                     match self.terrain[i] {
                         TILE_EMPTY => pad = '.',
                         TILE_MOUNTAIN => pad = '^',
-                        TILE_FOG => {pad = '.'; back = BrightBlack},
-                        TILE_FOG_OBSTACLE => {pad = '^'; back = BrightBlack},
+                        TILE_FOG => {
+                            pad = '.';
+                            back = BrightBlack
+                        }
+                        TILE_FOG_OBSTACLE => {
+                            pad = '^';
+                            back = BrightBlack
+                        }
                         n => {
                             pad = '.';
                             front = player_colors[n as usize]
@@ -349,7 +396,11 @@ impl fmt::Display for State {
 
                 let num = show_num(self.armies[i] as usize);
 
-                write!(f, "{} ", pad_front(pad, 4, &num).on_color(back).color(front))?;
+                write!(
+                    f,
+                    "{} ",
+                    pad_front(pad, 4, &num).on_color(back).color(front)
+                )?;
             }
             writeln!(f)?;
         }

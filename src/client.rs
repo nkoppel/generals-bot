@@ -1,13 +1,13 @@
-use super::state::*;
 use super::simulator::Player;
+use super::state::*;
 
-use std::{thread, time::Duration};
 use std::net::TcpStream;
+use std::{thread, time::Duration};
 
-use tungstenite::*;
-use tungstenite::Message::*;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::Error::*;
+use tungstenite::Message::*;
+use tungstenite::*;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -30,17 +30,15 @@ const SLEEP_TIME: u64 = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameErr {
-    GameWon,
-    GameLost,
-    GameConnectionLost
+    Won,
+    Lost,
+    ConnectionLost,
 }
-
-pub use GameErr::*;
 
 pub struct Client {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
     url: String,
-    id: String
+    id: String,
 }
 
 impl Client {
@@ -48,7 +46,7 @@ impl Client {
         Client {
             socket: connect(url).expect("Unable to connect").0,
             url: url.to_string(),
-            id: i.to_string()
+            id: i.to_string(),
         }
     }
 
@@ -92,7 +90,7 @@ impl Client {
                     thread::sleep(SECOND);
                     self.ping();
                     self.send_message(msg.clone());
-                },
+                }
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
                     if let Ok(Value::Array(val)) = serde_json::from_str(&s[2..]) {
@@ -115,7 +113,10 @@ impl Client {
 
         loop {
             match self.socket.read_message() {
-                Ok(Pong(_)) => {thread::sleep(SECOND); self.ping()},
+                Ok(Pong(_)) => {
+                    thread::sleep(SECOND);
+                    self.ping()
+                }
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
                     if let Ok(val) = serde_json::from_str::<Value>(&s[2..]) {
@@ -138,7 +139,8 @@ impl Client {
     }
 
     pub fn get_message<F, T>(&mut self, func: F, default: T) -> T
-        where F: Fn(Value) -> Option<T>
+    where
+        F: Fn(Value) -> Option<T>,
     {
         loop {
             match self.socket.read_message() {
@@ -160,9 +162,9 @@ impl Client {
             if let Value::Array(arr) = val {
                 if let Value::String(c) = &arr[0] {
                     if c == "game_won" {
-                        return Some(Err(GameWon));
+                        return Some(Err(GameErr::Won));
                     } else if c == "game_lost" {
-                        return Some(Err(GameLost));
+                        return Some(Err(GameErr::Lost));
                     } else if c == "game_update" {
                         return Some(Ok(diff_from_value(&arr[1])));
                     }
@@ -171,7 +173,7 @@ impl Client {
             None
         };
 
-        self.get_message(f, Err(GameConnectionLost))
+        self.get_message(f, Err(GameErr::ConnectionLost))
     }
 
     pub fn get_game_start(&mut self) -> Option<GameStart> {
@@ -179,10 +181,8 @@ impl Client {
             if let Value::Array(arr) = val {
                 if let Value::String(s) = &arr[0] {
                     if s == "game_start" {
-                        return
-                            serde_json::from_str(
-                                &serde_json::to_string(&arr[1]).unwrap()
-                            ).unwrap();
+                        return serde_json::from_str(&serde_json::to_string(&arr[1]).unwrap())
+                            .unwrap();
                     }
                 }
             }
@@ -198,7 +198,7 @@ impl Client {
         if let Some(s) = self.get_game_start() {
             start = s;
         } else {
-            return GameConnectionLost;
+            return GameErr::ConnectionLost;
         }
 
         log!("Join match"; "type: {}", (start.game_type));
@@ -214,6 +214,8 @@ impl Client {
             if let Ok(diff) = msg {
                 state.patch(diff);
 
+                println!("{}", state);
+
                 self.send_move(player.get_move(&state, player_index));
             } else {
                 let err = msg.unwrap_err();
@@ -223,14 +225,14 @@ impl Client {
         }
     }
 
-    pub fn run_1v1(&mut self, mut player: &mut Box<dyn Player>) {
+    pub fn run_1v1(&mut self, player: &mut Box<dyn Player>) {
         loop {
             log!("Join 1v1"; "");
             self.join_1v1();
 
-            if self.run_player(&mut player) == GameConnectionLost {
+            if self.run_player(player) == GameErr::ConnectionLost {
                 self.socket = connect(&self.url).expect("Unable to connect").0;
-            // } else {
+                // } else {
                 // thread::sleep(Duration::from_secs(SLEEP_TIME));
             }
         }
@@ -248,18 +250,24 @@ struct GameUpdate {
     cities_diff: Vec<isize>,
 }
 
-use std::result::Result;
 use std::collections::HashMap;
+use std::result::Result;
 
 fn diff_from_value(val: &Value) -> StateDiff {
-    let update: GameUpdate =
-        serde_json::from_str(&serde_json::to_string(val).unwrap()).unwrap();
+    let update: GameUpdate = serde_json::from_str(&serde_json::to_string(val).unwrap()).unwrap();
 
-    let as_usize = |o: Option<&Value>| {o.unwrap().as_i64().unwrap() as usize};
+    let as_usize = |o: Option<&Value>| o.unwrap().as_i64().unwrap() as usize;
 
-    let scores = update.scores
+    let scores = update
+        .scores
         .iter()
-        .map(|m| (as_usize(m.get("i")), as_usize(m.get("tiles")), as_usize(m.get("total"))))
+        .map(|m| {
+            (
+                as_usize(m.get("i")),
+                as_usize(m.get("tiles")),
+                as_usize(m.get("total")),
+            )
+        })
         .collect::<Vec<_>>();
 
     let mut scores2 = vec![(0, 0); scores.len()];
@@ -268,12 +276,12 @@ fn diff_from_value(val: &Value) -> StateDiff {
         scores2[i] = (land, armies);
     }
 
-    return StateDiff {
+    StateDiff {
         turn: update.turn,
         map_diff: update.map_diff,
         cities_diff: update.cities_diff,
         generals: update.generals,
-        scores: scores2
+        scores: scores2,
     }
 }
 

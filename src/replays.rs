@@ -1,11 +1,11 @@
-use crate::state::*;
 use crate::simulator::*;
+use crate::state::*;
 use crate::PlayBackBot;
 
 use std::io::Read;
 
-use serde::Deserialize;
 use anyhow::Result;
+use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
 struct ReplayMove {
@@ -69,35 +69,40 @@ impl Replay {
                 }
             }
 
-            moves[mov.index][turn] =
-                Some(Move{start: mov.start as usize, end: mov.end as usize, is50: mov.is50 != 0});
+            moves[mov.index][turn] = Some(Move {
+                start: mov.start as usize,
+                end: mov.end as usize,
+                is50: mov.is50 != 0,
+            });
         }
 
         let turns = moves[0].len();
 
-        let bots = moves.into_iter().map(|moves| {
-                Box::new(
-                    PlayBackBot {
-                        moves,
-                        start_turn: 1
-                    }
-                ) as Box<dyn Player>
+        let bots = moves
+            .into_iter()
+            .map(|moves| {
+                Box::new(PlayBackBot {
+                    moves,
+                    start_turn: 1,
+                }) as Box<dyn Player>
             })
             .collect::<Vec<_>>();
 
         let size = self.mapWidth * self.mapHeight;
-        let mut state =
-            State {
-                width: self.mapWidth,
-                height: self.mapHeight,
-                turn: 0,
-                terrain: vec![TILE_EMPTY; size],
-                armies: vec![0; size],
-                cities: self.cities.clone(),
-                generals: self.generals.clone(),
-                scores: vec![(0, 0); self.generals.len()],
-                teams: self.teams.clone().unwrap_or_else(|| (0..self.generals.len() as isize).collect())
-            };
+        let mut state = State {
+            width: self.mapWidth,
+            height: self.mapHeight,
+            turn: 0,
+            terrain: vec![TILE_EMPTY; size],
+            armies: vec![0; size],
+            cities: self.cities.clone(),
+            generals: self.generals.clone(),
+            scores: vec![(0, 0); self.generals.len()],
+            teams: self
+                .teams
+                .clone()
+                .unwrap_or_else(|| (0..self.generals.len() as isize).collect()),
+        };
 
         for i in 0..self.cities.len() {
             state.armies[self.cities[i] as usize] = self.cityArmies[i];
