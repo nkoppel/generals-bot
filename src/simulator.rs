@@ -20,15 +20,14 @@ pub fn get_neighbor_mask(width: usize, height: usize, loc: usize) -> [bool; 4] {
 }
 
 pub fn get_neighbor_locs(width: usize, _height: usize, loc: usize) -> [usize; 4] {
-    [loc - width, loc + 1, loc + width, loc - 1]
+    [loc.saturating_sub(width), loc + 1, loc + width, loc.saturating_sub(1)]
 }
 
 pub fn get_neighbors(width: usize, height: usize, loc: usize) -> impl Iterator<Item = usize> {
     let mask = get_neighbor_mask(width, height, loc);
     let locs = get_neighbor_locs(width, height, loc);
 
-    mask
-        .into_iter()
+    mask.into_iter()
         .zip(locs.into_iter())
         .filter_map(|(valid, loc)| valid.then_some(loc))
 }
@@ -127,7 +126,6 @@ impl State {
             if *loc >= 0 && out.terrain[*loc as usize] == TILE_FOG_OBSTACLE {
                 out.terrain[*loc as usize] = TILE_FOG
             }
-
         }
 
         for loc in &self.cities {
@@ -253,6 +251,25 @@ impl State {
 
         Some(Move::new(start, end, false))
     }
+
+    pub fn step(&mut self, moves: &[Option<Move>]) {
+        if self.turn % 2 == 1 {
+            for (player, mov) in moves.iter().enumerate().rev() {
+                if let Some(mov) = mov {
+                    self.do_move(player, *mov);
+                }
+            }
+        } else {
+            for (player, mov) in moves.iter().enumerate() {
+                if let Some(mov) = mov {
+                    self.do_move(player, *mov);
+                }
+            }
+        }
+
+        self.incr_armies();
+        self.update_scores();
+    }
 }
 
 pub trait Player {
@@ -309,20 +326,7 @@ impl Simulator {
 
     pub fn step(&mut self) {
         let moves = self.get_moves();
-
-        #[allow(clippy::needless_range_loop)]
-        for mut player in 0..self.state.generals.len() {
-            if self.state.turn % 2 == 1 {
-                player = self.state.generals.len() - 1 - player
-            }
-
-            if let Some(mov) = moves[player] {
-                self.state.do_move(player, mov);
-            }
-        }
-
-        self.state.incr_armies();
-        self.state.update_scores();
+        self.state.step(&moves);
     }
 
     // if game is over, return the id of the team that won

@@ -9,16 +9,18 @@ mod state;
 
 #[allow(unused_imports)]
 use crate::{bots::*, client::*, replays::*, simulator::*, state::*};
+use dfdx::prelude::*;
 
 fn main() {
     // use std::env;
-
-    // tch::maybe_init_cuda();
-    // tch::Cuda::set_user_enabled_cudnn(true);
-    // tch::Cuda::cudnn_set_benchmark(true);
     // let args: Vec<String> = env::args().collect();
 
-    // let bot = RandomBot{};
+    let dev = Cuda::default();
+    let net1 = dev.build_module::<BigNet, f32>();
+    let net2 = dev.build_module::<BigNet, f32>();
+
+    let bot1 = NNBot::new(net1, dev.clone());
+    let bot2 = NNBot::new(net2, dev.clone());
 
     // let mut client = Client::new("wss://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
@@ -29,17 +31,14 @@ fn main() {
     // client.run_player(&mut (Box::new(bot1) as Box<dyn Player>));
     // client.debug_listen();
 
-    // let players =
-    // vec![
-    // Box::new(bot) as Box<dyn Player>,
-    // Box::new(bot),
-    // ];
+    let players = vec![Box::new(bot1) as Box<dyn Player>, Box::new(bot2)];
 
-    // let mut state = State::generate(18, 18, 60, 10, 2, 15);
+    let mut state = State::generate(18, 18, 60, 10, 2, 15);
 
-    // let mut sim = Simulator::new(state, players);
+    let mut sim = Simulator::new(state, players);
 
     // sim.sim(100000, 250, true);
+    sim.sim(100000, 0, true);
 
     // let (mut sim, len) = Replay::read_from_file("replays_prod/H5LmDhpUg.gioreplay").unwrap().to_simulator();
 
@@ -50,5 +49,5 @@ fn main() {
     // // let mut nn = NN::from_file("nets2/net4_0_5200.gio_nn", 0.000005).unwrap();
 
     // train_from_replays(&args[1], &args[2], 1, &mut nn).unwrap()
-    test();
+    // test();
 }
