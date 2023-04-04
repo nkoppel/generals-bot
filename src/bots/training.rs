@@ -12,8 +12,8 @@ use indicatif::ProgressIterator;
 type D = Cuda;
 
 const EPISODE_LENGTH: usize = 1000;
-const ARMY_REWARD_FACTOR: f32 = 0;
-const LAND_REWARD_FACTOR: f32 = 2e-2;
+const ARMY_REWARD_FACTOR: f32 = 1e-3;
+const LAND_REWARD_FACTOR: f32 = 1e-2;
 const SPECTATE: bool = false;
 const TD_STEP: usize = 100;
 const BATCH_SIZE: usize = 167;
@@ -32,7 +32,7 @@ pub struct EpisodeData {
     policies: Vec<Tensor<ActionShape, f32, Cpu>>,
     masks: Vec<Tensor<ActionShape, f32, Cpu>>,
     values: Vec<f32>,
-    rewards: Vec<f32>,
+    reward: f32,
     advantages: Vec<f32>,
     target_values: Vec<f32>,
 }
@@ -56,28 +56,17 @@ fn to_device<S: Shape, E: Unit, D: DeviceStorage, D2: DeviceStorage + TensorFrom
 }
 
 impl EpisodeData {
-    // don't train off of the last step, because winning causes too large of a policy update
     fn compute_advantage(&mut self) {
-        self.advantages = vec![0.; self.rewards.len()];
-        *self.advantages.last_mut().unwrap() =
-            self.rewards.last().unwrap() - self.values.last().unwrap();
+        self.advantages = vec![0.; self.values.len()];
+        *self.advantages.last_mut().unwrap() = self.reward - self.values.last().unwrap();
 
-        for i in 0..self.rewards.len() - 1 {
-            self.advantages[i] = self.rewards[i] + self.values[i + 1] - self.values[i];
+        for i in 0..self.values.len() - 1 {
+            self.advantages[i] = self.values[i + 1] - self.values[i];
         }
     }
 
     fn compute_target_values(&mut self) {
-        let mut window_reward = 0.;
-
-        self.target_values = vec![0.; self.rewards.len()];
-
-        for i in (0..self.rewards.len()).rev() {
-            let future_value = *self.values.get(i + TD_STEP).unwrap_or(&0.0);
-            window_reward += self.rewards[i];
-            window_reward -= *self.rewards.get(i + TD_STEP).unwrap_or(&0.0);
-            self.target_values[i] = future_value + window_reward;
-        }
+        self.target_values = vec![self.reward; self.values.len()];
     }
 
     fn get_inputs(&self, dev: &D) -> Vec<Tensor<InputShape, f32, D>> {
@@ -168,22 +157,6 @@ pub struct TrainingBot<NN: Net<D>> {
 impl<NN: Net<D>> Player for TrainingBot<NN> {
     fn get_move(&mut self, state: &State, player: usize) -> Option<Move> {
         let cpu = Cpu::default();
-        let reward = {
-            let prev_scores = &self.feature_gen.state.scores;
-
-            let (land1, army1) = state.scores[player];
-            let (land2, army2) = state.scores[player ^ 1];
-            let (prev_land1, prev_army1) = prev_scores.get(player).unwrap_or(&(0, 0));
-            let (prev_land2, prev_army2) = prev_scores.get(player ^ 1).unwrap_or(&(0, 0));
-
-            ((army1 as f32 - army2 as f32) - (*prev_army1 as f32 - *prev_army2 as f32))
-                * ARMY_REWARD_FACTOR
-                + ((land1 as f32 - land2 as f32) - (*prev_land1 as f32 - *prev_land2 as f32))
-                    * LAND_REWARD_FACTOR
-            // (land1 as f32 - *prev_land1 as f32) * LAND_REWARD_FACTOR
-            // (army1 as f32 - *prev_army1 as f32) * ARMY_REWARD_FACTOR
-            // + (land1 as f32 - *prev_land1 as f32) * LAND_REWARD_FACTOR
-        };
 
         self.feature_gen.player = player;
         self.feature_gen
@@ -213,7 +186,6 @@ impl<NN: Net<D>> Player for TrainingBot<NN> {
         self.data.actions.push(action);
         self.data.policies.push(to_device(policy, &cpu));
         self.data.masks.push(to_device(mask, &cpu));
-        self.data.rewards.push(reward);
         self.data.values.push(value);
 
         if SPECTATE {
@@ -254,27 +226,20 @@ pub fn run_game<NN: Net<D>>(state: State, nets: [NN; 2], dev: &D) -> [EpisodeDat
         .try_into()
         .unwrap();
 
-    // if let Some(winner) = game_result {
-        // let loser = winner ^ 1;
-        // let winning_reward = 1.; // 50 land / 500 armies
-
-        // *data[winner].rewards.last_mut().unwrap() += winning_reward;
-        // *data[loser].rewards.last_mut().unwrap() -= winning_reward;
-    // }
+    for (d, scores) in data.iter_mut().zip(sim.state.scores.iter()) {
+        d.reward = scores.0 as f32 * LAND_REWARD_FACTOR + scores.1 as f32 * ARMY_REWARD_FACTOR;
+        d.compute_advantage();
+        d.compute_target_values();
+    }
 
     println!("{}", sim.state);
     println!(
         "Game finished in {:?} steps with scores {:?}, rewards [{}, {}]",
         sim.state.turn,
         sim.state.scores,
-        data[0].rewards.iter().sum::<f32>(),
-        data[1].rewards.iter().sum::<f32>()
+        data[0].reward,
+        data[1].reward
     );
-
-    for d in data.iter_mut() {
-        d.compute_advantage();
-        d.compute_target_values();
-    }
 
     data
 }
@@ -377,7 +342,7 @@ pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
     aux_opt: &mut Opt,
     dev: &D,
 ) {
-    for epoch in 10.. {
+    for epoch in 1.. {
         println!("Begin epoch {epoch}");
         let mut data_group = Vec::new();
 
@@ -410,7 +375,7 @@ pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
             }
         }
 
-        nn.save(format!("nets/smallnet_3_{epoch}.npz"))
+        nn.save(format!("nets/smallnet_4_{epoch}.npz"))
             .expect("failed to save network");
     }
 }
@@ -422,7 +387,7 @@ pub fn train() {
 
     let dev = Dev::default();
     let mut nn = dev.build_module::<SmallNet, f32>();
-    nn.load("nets/smallnet_3_9.npz").unwrap();
+    // nn.load("nets/smallnet_3_9.npz").unwrap();
     let config = AdamConfig {
         lr: POLICY_LR,
         betas: [0.9, 0.999],
