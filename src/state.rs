@@ -96,7 +96,7 @@ impl Move {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct State {
     pub width: usize,
     pub height: usize,
@@ -120,17 +120,7 @@ pub struct StateDiff {
 
 impl State {
     pub fn new() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            turn: 0,
-            terrain: Vec::new(),
-            armies: Vec::new(),
-            cities: Vec::new(),
-            generals: Vec::new(),
-            scores: Vec::new(),
-            teams: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn with_teams(teams: Vec<isize>) -> Self {
@@ -225,7 +215,7 @@ impl State {
                         (tiles[k] % width).abs_diff(*p % width)
                             + (tiles[k] / width).abs_diff(*p / width)
                     })
-                    .max()
+                    .min()
                     .unwrap_or(usize::MAX);
 
                 if min_dist >= player_distance {
@@ -259,6 +249,19 @@ impl State {
         }
 
         out
+    }
+
+    pub fn generate_1v1() -> State {
+        let mut rng = thread_rng();
+
+        State::generate(
+            rng.gen_range(17..=23),
+            rng.gen_range(17..=23),
+            rng.gen_range(60..=80),
+            rng.gen_range(10..=15),
+            2,
+            15,
+        )
     }
 
     fn serialize_map(&self) -> Vec<isize> {

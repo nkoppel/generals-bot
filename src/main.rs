@@ -1,5 +1,7 @@
 #![feature(test)]
 #![allow(dead_code)]
+#![feature(trait_upcasting)]
+#![feature(generic_const_exprs)]
 
 mod bots;
 mod client;
@@ -12,15 +14,35 @@ use crate::{bots::*, client::*, replays::*, simulator::*, state::*};
 use dfdx::prelude::*;
 
 fn main() {
-    // use std::env;
-    // let args: Vec<String> = env::args().collect();
+    train();
 
-    let dev = Cuda::default();
-    let net1 = dev.build_module::<BigNet, f32>();
-    let net2 = dev.build_module::<BigNet, f32>();
+    // test::<TinyNet, Cuda>();
+    // test::<SmallNet, Cuda>();
+    // test::<BigNet, Cuda>();
+    let dev = Cpu::default();
+    let mut net1 = dev.build_module::<TinyNet, f32>();
+    let mut net2 = dev.build_module::<TinyNet, f32>();
+    net1.load("nets/tinynet_1_50.npz").unwrap();
+    net2.load("nets/tinynet_1_50.npz").unwrap();
+
+    let state = State::generate_1v1();
 
     let bot1 = NNBot::new(net1, dev.clone());
-    let bot2 = NNBot::new(net2, dev.clone());
+    let bot2 = NNBot::new(net2, dev);
+
+    // let bot1 = RandomBot {};
+    // let bot2 = RandomBot {};
+
+    let players = vec![Box::new(bot1) as Box<dyn Player>, Box::new(bot2)];
+
+    let mut sim = Simulator::new(state, players);
+
+    sim.sim(100000, 250, true);
+    // println!("{:?}", sim.state.scores);
+    // println!("{}", sim.state);
+
+    // use std::env;
+    // let args: Vec<String> = env::args().collect();
 
     // let mut client = Client::new("wss://botws.generals.io/socket.io/?EIO=3&transport=websocket", &args[1]);
 
@@ -30,24 +52,4 @@ fn main() {
     // client.set_force_start(&args[2]);
     // client.run_player(&mut (Box::new(bot1) as Box<dyn Player>));
     // client.debug_listen();
-
-    let players = vec![Box::new(bot1) as Box<dyn Player>, Box::new(bot2)];
-
-    let mut state = State::generate(18, 18, 60, 10, 2, 15);
-
-    let mut sim = Simulator::new(state, players);
-
-    // sim.sim(100000, 250, true);
-    sim.sim(100000, 0, true);
-
-    // let (mut sim, len) = Replay::read_from_file("replays_prod/H5LmDhpUg.gioreplay").unwrap().to_simulator();
-
-    // sim.sim(1000000, 0, true);
-
-    // println!("{} {}", tch::Cuda::is_available(), tch::Cuda::cudnn_is_available());
-    // let mut nn = NN::new(3, &[256; 6], &[256; 6], &[64, 64, 8], 176, 0.001);
-    // // let mut nn = NN::from_file("nets2/net4_0_5200.gio_nn", 0.000005).unwrap();
-
-    // train_from_replays(&args[1], &args[2], 1, &mut nn).unwrap()
-    // test();
 }

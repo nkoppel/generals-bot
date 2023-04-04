@@ -1,4 +1,7 @@
+use indicatif::ProgressIterator;
+
 use super::state::*;
+use std::any::Any;
 use std::mem;
 
 fn to_1d(width: usize, x: isize, y: isize) -> isize {
@@ -20,7 +23,12 @@ pub fn get_neighbor_mask(width: usize, height: usize, loc: usize) -> [bool; 4] {
 }
 
 pub fn get_neighbor_locs(width: usize, _height: usize, loc: usize) -> [usize; 4] {
-    [loc.saturating_sub(width), loc + 1, loc + width, loc.saturating_sub(1)]
+    [
+        loc.saturating_sub(width),
+        loc + 1,
+        loc + width,
+        loc.saturating_sub(1),
+    ]
 }
 
 pub fn get_neighbors(width: usize, height: usize, loc: usize) -> impl Iterator<Item = usize> {
@@ -71,7 +79,7 @@ impl State {
         self.scores.fill((0, 0));
 
         for i in 0..self.terrain.len() {
-            if let player @ 1.. = self.terrain[i] {
+            if let player @ 0.. = self.terrain[i] {
                 self.scores[player as usize].0 += 1;
                 self.scores[player as usize].1 += self.armies[i] as usize;
             }
@@ -79,7 +87,7 @@ impl State {
     }
 
     pub fn get_player_state(&self, player: usize) -> Self {
-        let deltas = vec![
+        let deltas = [
             (-1, -1),
             (0, -1),
             (1, -1),
@@ -107,24 +115,19 @@ impl State {
 
                         out.terrain[loc2] = self.terrain[loc2];
                         out.armies[loc2] = self.armies[loc2];
-
-                        let tmp = self
-                            .generals
-                            .clone()
-                            .iter_mut()
-                            .position(|x| *x == loc2 as isize);
-
-                        if let Some(idx) = tmp {
-                            out.generals[idx] = self.generals[idx];
-                        }
                     }
                 }
             }
         }
 
-        for loc in &self.generals {
-            if *loc >= 0 && out.terrain[*loc as usize] == TILE_FOG_OBSTACLE {
-                out.terrain[*loc as usize] = TILE_FOG
+        for (idx, loc) in self.generals.iter().enumerate() {
+            if *loc >= 0 {
+                if out.terrain[*loc as usize] == TILE_FOG_OBSTACLE {
+                    out.terrain[*loc as usize] = TILE_FOG;
+                }
+                if out.terrain[*loc as usize] > TILE_FOG {
+                    out.generals[idx] = *loc;
+                }
             }
         }
 
@@ -189,7 +192,7 @@ impl State {
         }
 
         ret |= self.terrain[mov.start] != player as isize;
-        ret |= self.armies[mov.start] < 1;
+        ret |= self.armies[mov.start] < 2;
 
         ret |= self.terrain[mov.end] < -1;
 
@@ -270,9 +273,28 @@ impl State {
         self.incr_armies();
         self.update_scores();
     }
+
+    // if game is over, return the id of the team that won
+    pub fn game_over(&self) -> Option<usize> {
+        let mut active_team = None;
+
+        for (player, general) in self.generals.iter().enumerate() {
+            if *general > -2 {
+                let team = self.teams[player] as usize;
+
+                if active_team.is_some() && active_team != Some(team) {
+                    return None;
+                }
+
+                active_team = Some(team);
+            }
+        }
+
+        active_team
+    }
 }
 
-pub trait Player {
+pub trait Player: Any {
     fn get_move(&mut self, state: &State, player: usize) -> Option<Move>;
 }
 
@@ -329,34 +351,15 @@ impl Simulator {
         self.state.step(&moves);
     }
 
-    // if game is over, return the id of the team that won
-    pub fn game_over(&self) -> Option<usize> {
-        let mut active_team = None;
-
-        for (player, general) in self.state.generals.iter().enumerate() {
-            if *general > -2 {
-                let team = self.state.teams[player] as usize;
-
-                if active_team.is_some() && active_team != Some(team) {
-                    return None;
-                }
-
-                active_team = Some(team);
-            }
-        }
-
-        active_team
-    }
-
     pub fn sim(&mut self, rounds: usize, wait: usize, spectate: bool) -> Option<usize> {
         let wait = Duration::from_millis(wait as u64);
 
-        for _ in 0..rounds {
+        for _ in (0..rounds).progress() {
             let time_spent = Instant::now();
 
             self.step();
 
-            if let out @ Some(_) = self.game_over() {
+            if let out @ Some(_) = self.state.game_over() {
                 return out;
             }
 

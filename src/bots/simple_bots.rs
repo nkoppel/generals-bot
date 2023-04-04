@@ -50,7 +50,7 @@ where
     }
 }
 
-impl<T> Player for FuncBot<T>
+impl<T: 'static> Player for FuncBot<T>
 where
     T: FnMut(&State, usize) -> Option<Move>,
 {
