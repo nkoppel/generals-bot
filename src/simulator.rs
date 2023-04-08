@@ -1,7 +1,6 @@
 use indicatif::ProgressIterator;
 
 use super::state::*;
-use std::any::Any;
 use std::mem;
 
 fn to_1d(width: usize, x: isize, y: isize) -> isize {
@@ -294,7 +293,7 @@ impl State {
     }
 }
 
-pub trait Player: Any {
+pub trait Player {
     fn get_move(&mut self, state: &State, player: usize) -> Option<Move>;
 }
 

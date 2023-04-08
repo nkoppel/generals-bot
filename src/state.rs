@@ -63,6 +63,55 @@ fn patch(vec: &[isize], diff: &[isize]) -> Vec<isize> {
     out
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DistanceTile {
+    Obstacle,
+    Empty,
+    Source,
+    Dest,
+}
+
+pub fn distance_field(
+    width: usize,
+    height: usize,
+    map: &impl Fn(usize) -> DistanceTile,
+) -> Vec<usize> {
+    let mut queue = VecDeque::new();
+    let mut out = vec![usize::MAX; width * height];
+
+    for (i, o) in out.iter_mut().enumerate() {
+        if map(i) == DistanceTile::Source {
+            *o = 0;
+            queue.push_back(i);
+        }
+    }
+
+    while let Some(tile) = queue.pop_front() {
+        for n in get_neighbors(width, height, tile) {
+            if out[n] == usize::MAX && map(n) != DistanceTile::Obstacle {
+                out[n] = out[tile] + 1;
+                queue.push_back(n)
+            }
+        }
+    }
+
+    out
+}
+
+pub fn min_distance(
+    width: usize,
+    height: usize,
+    map: &impl Fn(usize) -> DistanceTile,
+) -> Option<usize> {
+    let field = distance_field(width, height, map);
+
+    field
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, x)| (map(i) == DistanceTile::Dest).then_some(x))
+        .min()
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Move {
     pub start: usize,
@@ -167,7 +216,7 @@ impl State {
         self.width * self.height
     }
 
-    pub fn generate(
+    fn generate_internal(
         width: usize,
         height: usize,
         nmountians: usize,
@@ -249,6 +298,47 @@ impl State {
         }
 
         out
+    }
+
+    fn check_map(&self) -> bool {
+        let field = distance_field(self.width, self.height, &|i| {
+            if self.terrain[i] == TILE_MOUNTAIN {
+                DistanceTile::Obstacle
+            } else if i == self.generals[0] as usize {
+                DistanceTile::Source
+            } else {
+                DistanceTile::Empty
+            }
+        });
+
+        self.generals
+            .iter()
+            .all(|i| field[*i as usize] < usize::MAX)
+    }
+
+    pub fn generate(
+        width: usize,
+        height: usize,
+        nmountians: usize,
+        ncities: usize,
+        nplayers: usize,
+        player_distance: usize,
+    ) -> Self {
+        for _ in 0..100 {
+            let state = Self::generate_internal(
+                width,
+                height,
+                nmountians,
+                ncities,
+                nplayers,
+                player_distance,
+            );
+            if state.check_map() {
+                return state;
+            }
+        }
+
+        panic!("Failed to generate a map where players can reach each other within 100 attempts.")
     }
 
     pub fn generate_1v1() -> State {
@@ -344,10 +434,13 @@ fn show_num(n: usize) -> String {
     }
 }
 
+use std::collections::VecDeque;
 use std::fmt;
 
 use colored::Color::*;
 use colored::*;
+
+use crate::simulator::get_neighbors;
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

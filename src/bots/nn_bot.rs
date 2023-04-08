@@ -19,7 +19,7 @@ pub fn debug_print_tensor<D: Device<f32>, S: Shape<Concrete = [usize; 3]>>(t: &T
     for p in 0..panes {
         for h in 0..height {
             for w in 0..width {
-                print!("{:4.2} ", data[(p * height + h) * width + w]);
+                print!("{:5.2} ", data[(p * height + h) * width + w]);
             }
             println!();
         }
@@ -128,8 +128,7 @@ impl<D: Device<f32>> FeatureGen<D> {
                 .flat_map(|s| std::iter::repeat((s as f32 + 1.).ln()).take(size)),
         );
 
-        dev
-            .tensor_from_vec(out, [FEATURES, self.state.height, self.state.width])
+        dev.tensor_from_vec(out, [FEATURES, self.state.height, self.state.width])
             .realize()
             .unwrap()
     }
