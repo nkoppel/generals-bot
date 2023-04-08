@@ -118,13 +118,15 @@ pub fn test2() {
         weight_decay: None,
     });
 
-    let inp = dev.sample_normal::<Rank4<4, CHANNELS, 10, 10>>();
-    let expected = dev.ones::<Rank4<4, ACTIONS, 10, 10>>();
+    let inp = dev.sample_normal::<Rank4<100, CHANNELS, 10, 10>>();
+    let expected = dev.ones::<Rank4<100, ACTIONS, 10, 10>>();
+    let zeros: Tensor<_, f32, _> = dev.zeros::<Rank4<100, CHANNELS, 10, 10>>();
 
-    for _ in 0..100 {
-        let (out, _) = net.forward(inp.retaped::<OwnedTape<f32, D>>());
+    for _ in 0..1000000 {
+        let nans = zeros.clone() / zeros.clone();
+        let (out, _) = net.forward_mut(inp.retaped::<OwnedTape<f32, D>>());
         let loss = mse_loss(out, expected.clone());
-        println!("{}", loss.array());
+        println!("{} {}", loss.array(), nans.as_vec()[0]);
         let _ = opt.update(&mut net, &loss.backward());
     }
 }
