@@ -249,8 +249,8 @@ dependencies = [
 
 [[package]]
 name = "dfdx"
-version = "0.11.0"
-source = "git+https://github.com/coreylowman/dfdx#d38751b96e63635e631c715cd6933d9594972d58"
+version = "0.11.1"
+source = "git+https://github.com/coreylowman/dfdx#07aef2d3e6f717b3e7b4e11ef6d8ec5ea4900531"
 dependencies = [
  "cudarc",
  "glob",

@@ -11,11 +11,10 @@ mod state;
 
 #[allow(unused_imports)]
 use crate::{bots::*, client::*, replays::*, simulator::*, state::*};
-use dfdx::prelude::*;
 
 fn main() {
-    test2();
-    // train();
+    // test2();
+    train();
 
     // test::<TinyNet, Cuda>();
     // test::<SmallNet, Cuda>();

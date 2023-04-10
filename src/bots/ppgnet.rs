@@ -1,4 +1,7 @@
-use dfdx::{prelude::*, optim::{Adam, AdamConfig}};
+use dfdx::{
+    optim::{Adam, AdamConfig},
+    prelude::*,
+};
 
 pub const FEATURES: usize = 14;
 pub const NUM_FRAMES: usize = 16;
@@ -63,30 +66,30 @@ type UNetBlock<const C1: usize, const C2: usize, M> = Upscale2DResidual<(
     (Conv2D<C2, C1, 3, 1, 1>, Bias2D<C1>, ReLU),
 )>;
 
-// pub type UNet = Split2<
-    // (
-        // Downsample<CHANNELS, 64>,
-        // UNetBlock<64, 128, UNetBlock<128, 256, (Conv2D<256, 256, 3, 1, 1>, Bias2D<256>, ReLU)>>,
-        // Conv2D<64, ACTIONS, 1, 1, 0>,
-    // ),
-    // (
-        // Downsample<CHANNELS, 64>,
-        // (Block<64, 3, 1>, Conv2D<64, 128, 3, 2, 1>, Bias2D<128>, ReLU),
-        // (Block<128, 3, 1>, Conv2D<128, 256, 3, 2, 1>, Bias2D<256>, ReLU),
-        // (AvgPoolGlobal, Linear<256, 1>),
-    // ),
-// >;
-
 pub type UNet = Split2<
     (
         Downsample<CHANNELS, 64>,
-        UNetBlock<64, 128, (Conv2D<128, 128, 3, 1, 1>, Bias2D<128>, ReLU)>,
+        UNetBlock<
+            64,
+            128,
+            UNetBlock<
+                128,
+                256,
+                UNetBlock<256, 512, (Conv2D<512, 512, 3, 1, 1>, Bias2D<512>, ReLU)>,
+            >,
+        >,
         Conv2D<64, ACTIONS, 1, 1, 0>,
     ),
     (
         Downsample<CHANNELS, 64>,
         (Block<64, 3, 1>, Conv2D<64, 128, 3, 2, 1>, Bias2D<128>, ReLU),
-        (AvgPoolGlobal, Linear<128, 1>),
+        (
+            Block<128, 3, 1>,
+            Conv2D<128, 256, 3, 2, 1>,
+            Bias2D<256>,
+            ReLU,
+        ),
+        (AvgPoolGlobal, Linear<256, 1>),
     ),
 >;
 
@@ -108,15 +111,18 @@ where
 }
 
 pub fn test2() {
-    type D = Cuda;
+    type D = Cpu;
     let dev = D::default();
     let mut net = dev.build_module::<UNet, f32>();
-    let mut opt = Adam::new(&net, AdamConfig {
-        lr: 1e-4,
-        betas: [0.9, 0.999],
-        eps: 1e-8,
-        weight_decay: None,
-    });
+    let mut opt = Adam::new(
+        &net,
+        AdamConfig {
+            lr: 1e-4,
+            betas: [0.9, 0.999],
+            eps: 1e-8,
+            weight_decay: None,
+        },
+    );
 
     let inp = dev.sample_normal::<Rank4<100, CHANNELS, 10, 10>>();
     let expected = dev.ones::<Rank4<100, ACTIONS, 10, 10>>();

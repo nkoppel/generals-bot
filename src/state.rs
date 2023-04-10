@@ -354,6 +354,25 @@ impl State {
         )
     }
 
+    pub fn generate_1v1_batch(n: usize) -> Vec<State> {
+        let mut rng = thread_rng();
+        let width = rng.gen_range(17..=23);
+        let height = rng.gen_range(17..=23);
+
+        (0..n)
+            .map(|_| {
+                State::generate(
+                    width,
+                    height,
+                    rng.gen_range(60..=80),
+                    rng.gen_range(10..=15),
+                    2,
+                    15,
+                )
+            })
+            .collect()
+    }
+
     fn serialize_map(&self) -> Vec<isize> {
         let mut out = vec![self.width as isize, self.height as isize];
         out.extend_from_slice(&self.armies[..]);

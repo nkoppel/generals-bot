@@ -156,34 +156,74 @@ impl EpisodeData {
     }
 }
 
-pub struct TrainingBot<NN: Net<D>> {
-    data: EpisodeData,
-    feature_gen: FeatureGen<D>,
-    net: NN,
-    dev: D,
-}
+impl State {
+    fn initial_general_distance(&self) -> Option<usize> {
+        min_distance(self.width, self.height, &|i| {
+            if i == self.generals[0] as usize {
+                DistanceTile::Source
+            } else if self.terrain[i] == TILE_MOUNTAIN {
+                DistanceTile::Obstacle
+            } else if self.generals[1..].contains(&(i as isize)) {
+                DistanceTile::Dest
+            } else {
+                DistanceTile::Empty
+            }
+        })
+    }
 
-impl<NN: Net<D>> std::fmt::Debug for TrainingBot<NN> {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
+    fn general_distance(&self, player: usize) -> Option<usize> {
+        min_distance(self.width, self.height, &|i| {
+            if i == self.generals[player] as usize {
+                DistanceTile::Source
+            } else if self.terrain[i] == TILE_MOUNTAIN {
+                DistanceTile::Obstacle
+            } else if self.terrain[i] >= 0 && self.terrain[i] != player as isize {
+                DistanceTile::Dest
+            } else {
+                DistanceTile::Empty
+            }
+        })
     }
 }
 
-impl<NN: Net<D>> Player for TrainingBot<NN> {
-    fn get_move(&mut self, state: &State, player: usize) -> Option<Move> {
+struct Agent {
+    feature_gen: FeatureGen<D>,
+    data: EpisodeData,
+    prev_value: f32,
+    initial_distance: usize,
+    dev: D,
+}
+
+impl Agent {
+    fn get_features(&mut self, state: State) -> Tensor<InputShape, f32, D> {
+        self.feature_gen.update(state, &self.dev);
+        self.feature_gen.features()
+    }
+
+    fn update_rewards(&mut self, state: &State) {
+        let mut value = if let Some(winner) = state.game_over() {
+            self.initial_distance as f32 * if winner == 0 { 1.0 } else { -1.0 }
+        } else {
+            state.general_distance(0).unwrap() as f32 - state.general_distance(1).unwrap() as f32
+        };
+
+        value *= DISTANCE_REWARD_FACTOR;
+
+        if self.feature_gen.player == 1 {
+            value = -value;
+        }
+
+        let reward = value - self.prev_value;
+        self.prev_value = value;
+        self.data.rewards.push(reward);
+    }
+
+    fn get_move(&mut self, policy: Tensor<ActionShape, f32, D>, value: f32) -> Option<Move> {
         let cpu = Cpu::default();
-
-        self.feature_gen.player = player;
-        self.feature_gen
-            .update(state.get_player_state(player), &self.dev);
-
-        let observation = self.feature_gen.get_features();
-        let (policy, value) = self.net.forward(observation.clone());
-        let value = value.as_vec()[0];
-
+        let observation = self.feature_gen.buf.as_ref().unwrap().clone();
         let mask = self.feature_gen.action_mask(&self.dev);
 
-        let (action, mov, prob) = if let Some((a, m, p)) = self
+        let (action, mov, _prob) = if let Some((a, m, p)) = self
             .feature_gen
             .get_move_with_mask(policy.clone(), mask.clone())
         {
@@ -203,98 +243,91 @@ impl<NN: Net<D>> Player for TrainingBot<NN> {
         self.data.masks.push(to_device(mask, &cpu));
         self.data.values.push(value);
 
-        if SPECTATE {
-            println!("Player {player}: {mov:?} {prob} {value}")
-        }
-
         mov
     }
 }
 
-impl State {
-    fn get_general_distance(&self, player: usize) -> Option<usize> {
-        min_distance(self.width, self.height, &|i| {
-            if i == self.generals[player] as usize {
-                DistanceTile::Source
-            } else if self.terrain[i] == TILE_MOUNTAIN {
-                DistanceTile::Obstacle
-            } else if self.terrain[i] >= 0 && self.terrain[i] != player as isize {
-                DistanceTile::Dest
-            } else {
-                DistanceTile::Empty
+pub fn run_games<NN: Net<D>>(net: NN, dev: &D) -> (Vec<EpisodeData>, NN) {
+    let mut states = State::generate_1v1_batch(PPO_STEPS);
+    let mut initial_distances = states.iter().map(|s| s.general_distance(0).unwrap()).collect::<Vec<_>>();
+    let mut agents = (0..PPO_STEPS * 2)
+        .map(|i| {
+            let mut feature_gen = FeatureGen::new();
+            feature_gen.player = i % 2;
+            Agent {
+                feature_gen,
+                data: EpisodeData::default(),
+                prev_value: 0.,
+                initial_distance: initial_distances[i / 2],
+                dev: dev.clone(),
             }
         })
-    }
-}
+        .collect::<Vec<_>>();
 
-pub fn run_game<NN: Net<D>>(mut state: State, nets: [NN; 2], dev: &D) -> [EpisodeData; 2] {
-    let mut players: [TrainingBot<NN>; 2] = nets
-        .into_iter()
-        .map(|net| TrainingBot {
-            data: EpisodeData::default(),
-            feature_gen: FeatureGen::default(),
-            net,
-            dev: dev.clone(),
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-
-    let initial_distance = state.get_general_distance(0).unwrap() as f32;
-    let mut game_result = None;
-    let mut rewards = Vec::new();
-    let mut prev_value = 0.0;
+    let width = states[0].width;
+    let height = states[0].height;
+    let mut completed_states = Vec::new();
+    let mut completed_agents = Vec::new();
 
     for _ in (0..EPISODE_LENGTH).progress() {
-        let moves: Vec<Option<Move>> = players
+        let observations = states
+            .iter()
+            .flat_map(|s| [s.get_player_state(0), s.get_player_state(1)])
+            .zip(agents.iter_mut())
+            .map(|(s, a)| a.get_features(s))
+            .collect::<Vec<_>>()
+            .stack();
+
+        let observations = observations
+            .reshape_like(&(agents.len(), Const, height, width))
+            .unwrap();
+        let (policies, values) = net.forward(observations);
+
+        let moves = agents
             .iter_mut()
-            .enumerate()
-            .map(|(i, player)| player.get_move(&state.get_player_state(i), i))
-            .collect();
+            .zip((0..states.len() * 2).map(|i| policies.clone().select(dev.tensor(i))))
+            .zip(values.as_vec().into_iter())
+            .map(|((agent, policy), value)| agent.get_move(policy, value));
 
-        state.step(&moves);
+        for (moves, state) in moves.batch_exact(Const::<2>).zip(states.iter_mut()) {
+            state.step(&moves);
+        }
 
-        let value = if let Some(winner) = state.game_over() {
-            game_result = Some(winner);
-            initial_distance * if winner == 0 { 1.0 } else { -1.0 }
-        } else {
-            state.get_general_distance(0).unwrap() as f32
-                - state.get_general_distance(1).unwrap() as f32
-        };
+        for (state, agent) in states.iter().flat_map(|s| [s; 2]).zip(agents.iter_mut()) {
+            agent.update_rewards(state);
+        }
 
-        rewards.push((value - prev_value) * DISTANCE_REWARD_FACTOR);
-        prev_value = value;
-
-        if game_result.is_some() {
-            break;
+        for i in (0..states.len()).rev() {
+            if states[i].game_over().is_some() {
+                completed_states.push(states.swap_remove(i));
+                completed_agents.push(agents.swap_remove(i * 2 + 1));
+                completed_agents.push(agents.swap_remove(i * 2));
+            }
         }
     }
 
-    let mut data: [EpisodeData; 2] = players
-        .into_iter()
-        .map(|x| x.data)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
+    states.append(&mut completed_states);
+    agents.append(&mut completed_agents);
 
-    data[0].rewards = rewards.clone();
-    data[1].rewards = rewards.into_iter().map(|x| -x).collect();
-
-    for d in data.iter_mut() {
-        d.compute_advantage();
-        d.compute_target_values();
+    for (i, state) in states.iter().enumerate() {
+        println!(
+            "{}/{PPO_STEPS} {} {} {state}",
+            i + 1,
+            agents[i * 2].data.rewards.iter().sum::<f32>(),
+            agents[i * 2 + 1].data.rewards.iter().sum::<f32>()
+        );
     }
 
-    println!("{}", state);
-    println!(
-        "Game finished in {:?} steps with scores {:?}, rewards [{}, {}]",
-        state.turn,
-        state.scores,
-        data[0].rewards.iter().sum::<f32>(),
-        data[1].rewards.iter().sum::<f32>()
-    );
+    let data = agents
+        .into_iter()
+        .map(|mut a| {
+            a.data.compute_advantage();
+            a.data.compute_target_values();
+            a.data
+        })
+        .collect();
 
-    data
+    (data, net)
 }
 
 // NOTE: policy and value optimzation intentionally kept seperate in this function
@@ -316,7 +349,11 @@ pub fn train_ppo<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
         new_value.extend(value.as_vec().into_iter());
 
         if policy.as_vec().into_iter().any(f32::is_nan) {
-            debug_print_tensor(&policy.retaped().select(dev.tensor(batch.policy.shape().concrete()[0] - 1)));
+            debug_print_tensor(
+                &policy
+                    .retaped()
+                    .select(dev.tensor(batch.policy.shape().concrete()[0] - 1)),
+            );
             println!("{:?}", policy.shape().concrete());
             panic!("Oops! all NaNs!");
         }
@@ -410,8 +447,8 @@ pub fn train_auxiliary<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
     data.compute_target_values();
 }
 
-pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
-    nn: &mut NN,
+pub fn train_ppg<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
+    mut nn: NN,
     policy_opt: &mut Opt,
     value_opt: &mut Opt,
     aux_opt: &mut Opt,
@@ -419,15 +456,8 @@ pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
 ) {
     for epoch in 1.. {
         println!("Begin epoch {epoch}");
-        let mut data_group = Vec::new();
-
-        for game in 1..=PPO_STEPS {
-            println!("Begin game {game}/{PPO_STEPS}");
-            let [d1, d2] = run_game(State::generate_1v1(), [nn.clone(), nn.clone()], dev);
-
-            data_group.push(d1);
-            data_group.push(d2);
-        }
+        let (data_group, nn2) = run_games(nn, dev);
+        nn = nn2;
 
         for (e, episode) in data_group.clone().iter_mut().enumerate() {
             println!(
@@ -435,7 +465,7 @@ pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
                 e + 1,
                 data_group.len()
             );
-            train_ppo(nn, policy_opt, value_opt, episode, dev.clone());
+            train_ppo(&mut nn, policy_opt, value_opt, episode, dev.clone());
         }
 
         #[allow(clippy::reversed_empty_ranges)]
@@ -447,7 +477,7 @@ pub fn train_ppg<NN: Net<D> + Clone, Opt: Optimizer<NN, D, f32>>(
                     e + 1,
                     data_group.len()
                 );
-                train_auxiliary(nn, aux_opt, episode, dev.clone());
+                train_auxiliary(&mut nn, aux_opt, episode, dev.clone());
             }
         }
 
@@ -460,7 +490,7 @@ type Built<M, D, E> = <M as BuildOnDevice<D, E>>::Built;
 
 pub fn train() {
     let dev = D::default();
-    let mut nn = dev.build_module::<UNet, f32>();
+    let nn = dev.build_module::<UNet, f32>();
     // nn.load("nets/smallnet_6_33.npz").unwrap();
     let config = AdamConfig {
         lr: POLICY_LR,
@@ -478,5 +508,5 @@ pub fn train() {
     );
     let mut aux_opt: Adam<_, _, D> = Adam::new(&nn, config);
 
-    train_ppg(&mut nn, &mut policy_opt, &mut value_opt, &mut aux_opt, &dev)
+    train_ppg(nn, &mut policy_opt, &mut value_opt, &mut aux_opt, &dev)
 }

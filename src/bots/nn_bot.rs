@@ -75,7 +75,7 @@ impl<D: Device<f32>> FeatureGen<D> {
         self.buf = Some(buf);
     }
 
-    pub fn get_features(&self) -> Tensor<InputShape, f32, D> {
+    pub fn features(&self) -> Tensor<InputShape, f32, D> {
         self.buf.as_ref().unwrap().clone()
     }
 
@@ -225,7 +225,7 @@ impl<NN: Net<D>, D: Device<f32>> Player for NNBot<NN, D> {
         self.feature_gen.player = player;
 
         self.feature_gen.update(state.clone(), &self.dev);
-        let features = self.feature_gen.get_features();
+        let features = self.feature_gen.features();
         let (policy, _) = self.nn.forward(features);
         let (_, mov, _) = self.feature_gen.get_move(policy, &self.dev)?;
 
