@@ -89,7 +89,13 @@ pub type UNet = Split2<
             Bias2D<256>,
             ReLU,
         ),
-        (AvgPoolGlobal, Linear<256, 1>),
+        (
+            Block<256, 3, 1>,
+            Conv2D<256, 512, 3, 2, 1>,
+            Bias2D<512>,
+            ReLU,
+        ),
+        (AvgPoolGlobal, Linear<512, 1>),
     ),
 >;
 

@@ -19,9 +19,9 @@ const BATCH_SIZE: usize = 100;
 
 const B_ENTROPY: f32 = 0.01;
 const B_CLONE: f32 = 1.0;
-const POLICY_LR: f32 = 1e-4;
-const VALUE_LR: f32 = 1e-4;
-const PPO_STEPS: usize = 32;
+const POLICY_LR: f32 = 2e-5;
+const VALUE_LR: f32 = 2e-5;
+const PPO_STEPS: usize = 50;
 const AUX_EPOCHS: usize = 0;
 
 #[derive(Debug, Default, Clone)]
@@ -190,7 +190,6 @@ struct Agent {
     feature_gen: FeatureGen<D>,
     data: EpisodeData,
     prev_value: f32,
-    initial_distance: usize,
     dev: D,
 }
 
@@ -201,20 +200,16 @@ impl Agent {
     }
 
     fn update_rewards(&mut self, state: &State) {
-        let mut value = if let Some(winner) = state.game_over() {
-            self.initial_distance as f32 * if winner == 0 { 1.0 } else { -1.0 }
-        } else {
-            state.general_distance(0).unwrap() as f32 - state.general_distance(1).unwrap() as f32
-        };
+        let mut value = state.scores[0].0 as f32 - state.scores[1].0 as f32;
 
-        value *= DISTANCE_REWARD_FACTOR;
+        value *= LAND_REWARD_FACTOR;
 
         if self.feature_gen.player == 1 {
             value = -value;
         }
-
         let reward = value - self.prev_value;
         self.prev_value = value;
+
         self.data.rewards.push(reward);
     }
 
@@ -249,7 +244,6 @@ impl Agent {
 
 pub fn run_games<NN: Net<D>>(net: NN, dev: &D) -> (Vec<EpisodeData>, NN) {
     let mut states = State::generate_1v1_batch(PPO_STEPS);
-    let mut initial_distances = states.iter().map(|s| s.general_distance(0).unwrap()).collect::<Vec<_>>();
     let mut agents = (0..PPO_STEPS * 2)
         .map(|i| {
             let mut feature_gen = FeatureGen::new();
@@ -258,7 +252,6 @@ pub fn run_games<NN: Net<D>>(net: NN, dev: &D) -> (Vec<EpisodeData>, NN) {
                 feature_gen,
                 data: EpisodeData::default(),
                 prev_value: 0.,
-                initial_distance: initial_distances[i / 2],
                 dev: dev.clone(),
             }
         })
@@ -302,6 +295,8 @@ pub fn run_games<NN: Net<D>>(net: NN, dev: &D) -> (Vec<EpisodeData>, NN) {
                 completed_states.push(states.swap_remove(i));
                 completed_agents.push(agents.swap_remove(i * 2 + 1));
                 completed_agents.push(agents.swap_remove(i * 2));
+                let len = completed_agents.len();
+                completed_agents.swap(len - 1, len - 2);
             }
         }
     }
@@ -454,7 +449,7 @@ pub fn train_ppg<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
     aux_opt: &mut Opt,
     dev: &D,
 ) {
-    for epoch in 1.. {
+    for epoch in 73.. {
         println!("Begin epoch {epoch}");
         let (data_group, nn2) = run_games(nn, dev);
         nn = nn2;
@@ -481,7 +476,7 @@ pub fn train_ppg<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
             }
         }
 
-        nn.save(format!("nets/unet_1_{epoch}.npz"))
+        nn.save(format!("nets/unet_4_{epoch}.npz"))
             .expect("failed to save network");
     }
 }
@@ -490,8 +485,9 @@ type Built<M, D, E> = <M as BuildOnDevice<D, E>>::Built;
 
 pub fn train() {
     let dev = D::default();
-    let nn = dev.build_module::<UNet, f32>();
-    // nn.load("nets/smallnet_6_33.npz").unwrap();
+    // dev.try_disable_cache();
+    let mut nn = dev.build_module::<UNet, f32>();
+    nn.load("nets/unet_4_72.npz").unwrap();
     let config = AdamConfig {
         lr: POLICY_LR,
         betas: [0.9, 0.999],
