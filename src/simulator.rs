@@ -35,7 +35,7 @@ pub fn get_neighbors(width: usize, height: usize, loc: usize) -> impl Iterator<I
     let locs = get_neighbor_locs(width, height, loc);
 
     mask.into_iter()
-        .zip(locs.into_iter())
+        .zip(locs)
         .filter_map(|(valid, loc)| valid.then_some(loc))
 }
 

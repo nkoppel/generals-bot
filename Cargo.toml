@@ -20,5 +20,5 @@ serde_json = "1.0"
 
 indicatif = "0.17"
 
-# TODO: change to a stable version of dfdx 
-dfdx = { git = "https://github.com/coreylowman/dfdx", features = ["cuda", "cudnn", "numpy", "nightly"] }
+candle-core = { version = "0.3", features = ["cuda"] }
+candle-nn = { version = "0.3", features = ["cuda"] }

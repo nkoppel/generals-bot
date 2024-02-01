@@ -3,12 +3,11 @@ pub const TILE_MOUNTAIN: isize = -2;
 pub const TILE_FOG: isize = -3;
 pub const TILE_FOG_OBSTACLE: isize = -4;
 
-pub use rand::random;
 pub use rand::seq::SliceRandom;
 pub use rand::thread_rng;
 pub use rand::Rng;
 
-fn diff(old: &Vec<isize>, new: &Vec<isize>) -> Vec<isize> {
+fn diff(old: &[isize], new: &[isize]) -> Vec<isize> {
     let mut out = Vec::new();
     let mut start = true;
     let mut i = 0;
@@ -463,7 +462,7 @@ use crate::simulator::get_neighbors;
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let player_colors = vec![Red, Blue, Green, Cyan, Magenta];
+        let player_colors = [Red, Blue, Green, Cyan, Magenta];
 
         writeln!(f, "{}", display_turn(self.turn))?;
 

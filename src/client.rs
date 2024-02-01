@@ -93,14 +93,16 @@ impl Client {
                 }
                 Err(_) | Ok(Close(_)) => break,
                 Ok(Text(s)) => {
-                    if let Ok(Value::Array(val)) = serde_json::from_str(&s[2..]) {
-                        if val[0] == Value::String("queue_update".to_string()) {
-                            if let Some(map) = val[1].as_object() {
-                                if let Some(Value::Bool(true)) = map.get("isForcing") {
-                                    break;
-                                }
-                            }
-                        }
+                    let Ok(Value::Array(val)) = serde_json::from_str(&s[2..]) else { continue };
+
+                    if val[0] != Value::String("queue_update".to_string()) {
+                        continue
+                    }
+
+                    let Some(map) = val[1].as_object() else { continue };
+
+                    if let Some(Value::Bool(true)) = map.get("isForcing") {
+                        break;
                     }
                 }
                 _ => {}
@@ -159,18 +161,15 @@ impl Client {
 
     pub fn get_diff(&mut self) -> Result<StateDiff, GameErr> {
         let f = |val| {
-            if let Value::Array(arr) = val {
-                if let Value::String(c) = &arr[0] {
-                    if c == "game_won" {
-                        return Some(Err(GameErr::Won));
-                    } else if c == "game_lost" {
-                        return Some(Err(GameErr::Lost));
-                    } else if c == "game_update" {
-                        return Some(Ok(diff_from_value(&arr[1])));
-                    }
-                }
+            let Value::Array(arr) = val else { return None };
+            let Value::String(c) = &arr[0] else { return None };
+
+            match c.as_str() {
+                "game_won" => Some(Err(GameErr::Won)),
+                "game_lost" => Some(Err(GameErr::Lost)),
+                "game_update" => Some(Ok(diff_from_value(&arr[1]))),
+                _ => None,
             }
-            None
         };
 
         self.get_message(f, Err(GameErr::ConnectionLost))
@@ -178,15 +177,13 @@ impl Client {
 
     pub fn get_game_start(&mut self) -> Option<GameStart> {
         let f = |val| {
-            if let Value::Array(arr) = val {
-                if let Value::String(s) = &arr[0] {
-                    if s == "game_start" {
-                        return serde_json::from_str(&serde_json::to_string(&arr[1]).unwrap())
-                            .unwrap();
-                    }
-                }
+            let Value::Array(arr) = val else { return None };
+
+            if arr[0].as_str() == Some("game_start") {
+                serde_json::from_str(&serde_json::to_string(&arr[1]).ok()?).ok()?
+            } else {
+                None
             }
-            None
         };
 
         self.get_message(f, None)

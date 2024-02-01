@@ -191,8 +191,6 @@ fn sample_logits<D: Device<f32>>(mut t: Tensor<(usize,), f32, D>) -> Option<(usi
     t = t.softmax();
     let mut sample: f32 = random();
 
-    // println!("{}", t.as_vec().into_iter().sum::<f32>());
-
     for (i, x) in t.as_vec().into_iter().enumerate() {
         sample -= x;
 

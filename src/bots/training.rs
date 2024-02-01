@@ -2,7 +2,7 @@ use super::*;
 
 use dfdx::{
     data::IteratorBatchExt,
-    optim::{Adam, AdamConfig},
+    optim::{Adam, AdamConfig, WeightDecay},
     prelude::*,
 };
 use indicatif::ProgressIterator;
@@ -19,8 +19,9 @@ const BATCH_SIZE: usize = 100;
 
 const B_ENTROPY: f32 = 0.01;
 const B_CLONE: f32 = 1.0;
-const POLICY_LR: f32 = 2e-5;
-const VALUE_LR: f32 = 2e-5;
+const POLICY_LR: f32 = 5e-4;
+const VALUE_LR: f32 = 5e-4;
+const WEIGHT_DECAY: f32 = 1e-4;
 const PPO_STEPS: usize = 50;
 const AUX_EPOCHS: usize = 0;
 
@@ -157,18 +158,33 @@ impl EpisodeData {
 }
 
 impl State {
-    fn initial_general_distance(&self) -> Option<usize> {
-        min_distance(self.width, self.height, &|i| {
-            if i == self.generals[0] as usize {
+    fn general_army_distance(&self, player: usize) -> f32 {
+        if self.generals[player] < 0 {
+            return 0.0;
+        }
+        if self.generals[player ^ 1] < 0 {
+            return (self.width + self.height) as f32 * DISTANCE_REWARD_FACTOR;
+        }
+        let distance = distance_field(self.width, self.height, &|i| {
+            if i == self.generals[player] as usize {
                 DistanceTile::Source
             } else if self.terrain[i] == TILE_MOUNTAIN {
                 DistanceTile::Obstacle
-            } else if self.generals[1..].contains(&(i as isize)) {
-                DistanceTile::Dest
             } else {
                 DistanceTile::Empty
             }
-        })
+        });
+
+        let weighted_sum = distance
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, d)| {
+                (self.terrain[i] >= 0 && self.terrain[i] != player as isize)
+                    .then(|| d * self.armies[i] as usize)
+            })
+            .sum::<usize>();
+
+        weighted_sum as f32 / self.scores[player ^ 1].1 as f32 * DISTANCE_REWARD_FACTOR
     }
 
     fn general_distance(&self, player: usize) -> Option<usize> {
@@ -200,9 +216,7 @@ impl Agent {
     }
 
     fn update_rewards(&mut self, state: &State) {
-        let mut value = state.scores[0].0 as f32 - state.scores[1].0 as f32;
-
-        value *= LAND_REWARD_FACTOR;
+        let mut value = state.general_army_distance(0) - state.general_army_distance(1);
 
         if self.feature_gen.player == 1 {
             value = -value;
@@ -343,16 +357,6 @@ pub fn train_ppo<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
         let (policy, value) = nn.forward_mut(batch.observations.retaped());
         new_value.extend(value.as_vec().into_iter());
 
-        if policy.as_vec().into_iter().any(f32::is_nan) {
-            debug_print_tensor(
-                &policy
-                    .retaped()
-                    .select(dev.tensor(batch.policy.shape().concrete()[0] - 1)),
-            );
-            println!("{:?}", policy.shape().concrete());
-            panic!("Oops! all NaNs!");
-        }
-
         let shape = policy.shape().concrete();
         let new_shape = (shape[0], shape[1..].iter().product::<usize>());
 
@@ -449,7 +453,7 @@ pub fn train_ppg<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
     aux_opt: &mut Opt,
     dev: &D,
 ) {
-    for epoch in 73.. {
+    for epoch in 1.. {
         println!("Begin epoch {epoch}");
         let (data_group, nn2) = run_games(nn, dev);
         nn = nn2;
@@ -476,7 +480,7 @@ pub fn train_ppg<NN: Net<D>, Opt: Optimizer<NN, D, f32>>(
             }
         }
 
-        nn.save(format!("nets/unet_4_{epoch}.npz"))
+        nn.save(format!("nets/unet_7_{epoch}.npz"))
             .expect("failed to save network");
     }
 }
@@ -485,14 +489,14 @@ type Built<M, D, E> = <M as BuildOnDevice<D, E>>::Built;
 
 pub fn train() {
     let dev = D::default();
-    // dev.try_disable_cache();
+    dev.try_disable_cache().unwrap();
     let mut nn = dev.build_module::<UNet, f32>();
-    nn.load("nets/unet_4_72.npz").unwrap();
+    // nn.load("nets/unet_6_40.npz").unwrap();
     let config = AdamConfig {
         lr: POLICY_LR,
         betas: [0.9, 0.999],
         eps: 1e-8,
-        weight_decay: None,
+        weight_decay: Some(WeightDecay::L2(WEIGHT_DECAY)),
     };
     let mut policy_opt: Adam<_, _, D> = Adam::new(&nn, config);
     let mut value_opt: Adam<_, _, D> = Adam::new(
